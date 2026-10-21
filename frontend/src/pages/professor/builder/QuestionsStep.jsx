@@ -106,7 +106,7 @@ export default function QuestionsStep({ exam, onNext, onBack }) {
   };
 
   const downloadTemplate = () => {
-    window.open(`/api/v1/exams/${exam.exam_id}/questions/template`, '_blank');
+    window.open(`${api.defaults.baseURL}/exams/${exam.exam_id}/questions/template`, '_blank');
   };
 
   return (

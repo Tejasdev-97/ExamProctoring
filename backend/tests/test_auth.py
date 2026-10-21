@@ -92,3 +92,34 @@ def test_usn_normalization_logic():
     assert _normalize_usn(" 1ab21cs001 ") == "1AB21CS001"
     assert _normalize_usn(None) is None
     assert _normalize_usn("   ") is None
+
+
+def test_auth_route_registration_and_methods():
+    """Verify that auth endpoints are registered under /api/v1 prefix with exact methods."""
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    client = TestClient(app)
+
+    # Registered route is POST /api/v1/auth/login
+    routes = {r.path: getattr(r, 'methods', set()) for r in app.routes}
+    assert "/api/v1/auth/login" in routes
+    assert "POST" in routes["/api/v1/auth/login"]
+    assert "/api/v1/auth/logout" in routes
+    assert "POST" in routes["/api/v1/auth/logout"]
+    assert "/api/v1/auth/me" in routes
+    assert "GET" in routes["/api/v1/auth/me"]
+
+    # Root /auth/login is not registered and returns 404
+    assert "/auth/login" not in routes
+    r_unprefixed = client.post("/auth/login", json={"identifier": "admin", "password": "pass"})
+    assert r_unprefixed.status_code == 404
+
+    # GET /api/v1/auth/login returns 405 Method Not Allowed
+    r_get = client.get("/api/v1/auth/login")
+    assert r_get.status_code == 405
+
+    # POST /api/v1/auth/login with empty JSON triggers validation (422) proving handler is reached
+    r_post_empty = client.post("/api/v1/auth/login", json={})
+    assert r_post_empty.status_code == 422
+

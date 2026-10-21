@@ -5,7 +5,37 @@
 
 import axios from 'axios';
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
+/**
+ * Normalizes the API base URL to ensure it always points to the '/api/v1' route prefix,
+ * regardless of whether the environment variable includes trailing slashes or omits the prefix.
+ *
+ * Examples:
+ *   - "https://backend.onrender.com" -> "https://backend.onrender.com/api/v1"
+ *   - "https://backend.onrender.com/" -> "https://backend.onrender.com/api/v1"
+ *   - "https://backend.onrender.com/api/v1" -> "https://backend.onrender.com/api/v1"
+ *   - "https://backend.onrender.com/api/v1/" -> "https://backend.onrender.com/api/v1"
+ *   - "" or undefined -> "http://localhost:8000/api/v1"
+ */
+export function normalizeApiBaseUrl(rawUrl) {
+  const url = (rawUrl || '').trim();
+  if (!url) {
+    return 'http://localhost:8000/api/v1';
+  }
+  const trimmed = url.replace(/\/+$/, '');
+  if (trimmed.endsWith('/api/v1')) {
+    return trimmed;
+  }
+  if (trimmed.endsWith('/api')) {
+    return `${trimmed}/v1`;
+  }
+  return `${trimmed}/api/v1`;
+}
+
+const rawEnvUrl = typeof import.meta !== 'undefined' && import.meta?.env
+  ? import.meta.env.VITE_API_BASE_URL
+  : (typeof process !== 'undefined' && process.env?.VITE_API_BASE_URL ? process.env.VITE_API_BASE_URL : undefined);
+
+export const BASE_URL = normalizeApiBaseUrl(rawEnvUrl);
 
 const api = axios.create({
   baseURL: BASE_URL,
@@ -16,6 +46,17 @@ const api = axios.create({
 
 // Attach Bearer token from localStorage (fallback when cookie unavailable)
 api.interceptors.request.use((config) => {
+  // Prevent duplicate /api/v1 prefix if a caller passed '/api/v1/...' or 'api/v1/...'
+  if (config.url) {
+    if (config.url.startsWith('/api/v1/')) {
+      config.url = config.url.replace(/^\/api\/v1/, '');
+    } else if (config.url.startsWith('api/v1/')) {
+      config.url = config.url.replace(/^api\/v1\/?/, '/');
+    } else if (config.url === '/api/v1' || config.url === 'api/v1') {
+      config.url = '/';
+    }
+  }
+
   const token = localStorage.getItem('ep_access_token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
