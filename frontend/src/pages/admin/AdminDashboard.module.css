@@ -1,0 +1,350 @@
+/* ==========================================
+   ExamProctor.ai — Admin Dashboard
+   Horizontal Neobrutalist Cards
+   ========================================== */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.title {
+  font-size: var(--font-size-3xl);
+  font-weight: 800;
+  color: var(--color-text-heading);
+  letter-spacing: -0.02em;
+}
+
+.subtitle {
+  color: var(--color-text-secondary);
+  font-weight: 600;
+  font-size: var(--font-size-sm);
+}
+
+/* Dashboard grid */
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-6);
+  width: 100%;
+  align-items: stretch;
+}
+
+/* Main clickable card */
+
+.tile {
+  --tile-accent: var(--color-blue);
+  --tile-shadow: var(--shadow-blue);
+
+  position: relative;
+  isolation: isolate;
+
+  width: 100%;
+  min-width: 0;
+  min-height: 150px;
+
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) 40px;
+  align-items: center;
+  gap: 18px;
+
+  padding: 24px;
+
+  background: var(--color-surface);
+  color: var(--color-text-heading);
+
+  border: var(--border-thick);
+  border-radius: var(--radius-xl);
+
+  box-shadow: var(--tile-shadow);
+
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    background-color 180ms ease;
+
+  outline: none;
+  box-sizing: border-box;
+}
+
+/* Keep card contents above the background */
+
+.tile>* {
+  min-width: 0;
+}
+
+/* Hover effect */
+
+.tile:hover {
+  transform: translateY(-3px) scale(1.01);
+  box-shadow:
+    var(--tile-shadow),
+    0 5px 0 var(--color-border);
+}
+
+/* Pressed state */
+
+.tile:active {
+  transform: translateY(1px) scale(0.99);
+}
+
+/* Keyboard accessibility */
+
+.tile:focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 4px;
+}
+
+/* ==========================================
+   LEFT: Icon box
+   ========================================== */
+
+.iconBox {
+  width: 56px;
+  height: 56px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  flex-shrink: 0;
+
+  border: var(--border-base);
+  border-radius: var(--radius-lg);
+
+  box-shadow: 3px 3px 0 var(--color-border);
+
+  box-sizing: border-box;
+}
+
+/* ==========================================
+   CENTER: Title, description and statistic
+   ========================================== */
+
+.tileContent {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 7px;
+
+  min-width: 0;
+}
+
+.tileTitle {
+  font-size: var(--font-size-xl);
+  font-weight: 800;
+  line-height: 1.2;
+
+  color: var(--color-text-heading);
+
+  overflow-wrap: anywhere;
+}
+
+.tileDesc {
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  line-height: var(--line-height-snug);
+
+  color: var(--color-text-secondary);
+
+  overflow-wrap: anywhere;
+}
+
+/* ==========================================
+   Statistic badge
+   Example: 4 USERS
+   ========================================== */
+
+.tileStat {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  width: fit-content;
+  max-width: 100%;
+
+  margin-top: 5px;
+  padding: 5px 10px;
+
+  border: 2px solid var(--tile-accent);
+  border-radius: 6px;
+
+  background: var(--color-surface);
+  color: var(--tile-accent);
+
+  font-size: var(--font-size-xs);
+  font-weight: 800;
+  line-height: 1.3;
+
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+
+  overflow-wrap: anywhere;
+  box-sizing: border-box;
+}
+
+/* ==========================================
+   RIGHT: Arrow button-style box
+   ========================================== */
+
+.arrowBox {
+  width: 40px;
+  height: 40px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  flex-shrink: 0;
+  justify-self: end;
+
+  color: var(--tile-accent);
+
+  background: var(--color-surface);
+
+  border: var(--border-base);
+  border-radius: 8px;
+
+  box-shadow: 3px 3px 0 var(--color-border);
+
+  transition:
+    transform 180ms ease,
+    background-color 180ms ease,
+    color 180ms ease,
+    box-shadow 180ms ease;
+
+  box-sizing: border-box;
+}
+
+/* Arrow hover treatment */
+
+.tile:hover .arrowBox {
+  transform: translateX(2px);
+
+  background: var(--tile-accent);
+  color: #ffffff;
+
+  box-shadow: 2px 2px 0 var(--color-border);
+}
+
+/* ==========================================
+   Responsive layout
+   ========================================== */
+
+@media (max-width: 900px) {
+  .grid {
+    gap: var(--space-5);
+  }
+
+  .tile {
+    grid-template-columns: 48px minmax(0, 1fr) 36px;
+    gap: 14px;
+    padding: 20px;
+  }
+
+  .iconBox {
+    width: 48px;
+    height: 48px;
+  }
+
+  .arrowBox {
+    width: 36px;
+    height: 36px;
+  }
+
+  .tileTitle {
+    font-size: var(--font-size-lg);
+  }
+}
+
+@media (max-width: 768px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .tile {
+    min-height: 130px;
+    grid-template-columns: 52px minmax(0, 1fr) 38px;
+    gap: 16px;
+    padding: 20px;
+  }
+
+  .iconBox {
+    width: 52px;
+    height: 52px;
+  }
+
+  .arrowBox {
+    width: 38px;
+    height: 38px;
+  }
+}
+
+@media (max-width: 420px) {
+  .tile {
+    grid-template-columns: 42px minmax(0, 1fr) 32px;
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .iconBox {
+    width: 42px;
+    height: 42px;
+  }
+
+  .iconBox svg {
+    width: 21px;
+    height: 21px;
+  }
+
+  .arrowBox {
+    width: 32px;
+    height: 32px;
+  }
+
+  .arrowBox svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .tileTitle {
+    font-size: var(--font-size-base);
+  }
+
+  .tileDesc {
+    font-size: var(--font-size-sm);
+  }
+}
+
+/* Respect reduced-motion preferences */
+
+@media (prefers-reduced-motion: reduce) {
+
+  .tile,
+  .arrowBox {
+    transition: none;
+  }
+
+  .tile:hover,
+  .tile:active,
+  .tile:hover .arrowBox {
+    transform: none;
+  }
+}

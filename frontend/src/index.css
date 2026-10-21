@@ -1,0 +1,3 @@
+/* ExamProctor.ai — index.css (entry point, imports global styles) */
+@import './styles/tokens.css';
+@import './styles/global.css';

@@ -1,0 +1,173 @@
+/* ProfessorDashboard.module.css */
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  width: 100%;
+  max-width: 1240px;
+  margin: 0 auto;
+}
+.header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); flex-wrap: wrap; }
+.greeting { font-size: var(--font-size-3xl); font-weight: var(--font-weight-extrabold); color: var(--color-text-heading); letter-spacing: -0.02em; }
+.sub { font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); color: var(--color-text-secondary); margin-top: var(--space-1); }
+.statsRow { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-4); }
+.statCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-6) var(--space-4);
+  background: var(--color-surface);
+  border: var(--border-base);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  text-align: center;
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+.statCard:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+}
+.statBlue   { box-shadow: var(--shadow-blue); } .statBlue svg { color: var(--color-blue); }
+.statGreen  { box-shadow: 4px 4px 0 var(--color-green); } .statGreen svg { color: var(--color-green); }
+.statOrange { box-shadow: var(--shadow-orange); } .statOrange svg { color: var(--color-orange); }
+.statValue { font-size: var(--font-size-4xl); font-weight: var(--font-weight-extrabold); color: var(--color-text-heading); line-height: 1; }
+.statLabel { font-size: var(--font-size-xs); font-weight: var(--font-weight-semibold); color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.08em; }
+.section { display: flex; flex-direction: column; gap: var(--space-4); }
+.sectionTitle { font-size: var(--font-size-xl); font-weight: var(--font-weight-bold); color: var(--color-text-heading); padding-bottom: var(--space-3); border-bottom: var(--border-base); }
+.examList { display: flex; flex-direction: column; gap: var(--space-3); }
+.examCard { background: var(--color-surface); border: var(--border-base); border-radius: var(--radius-lg); padding: var(--space-5) var(--space-6); box-shadow: var(--shadow-sm); transition: box-shadow var(--transition-fast), transform var(--transition-fast); }
+.examCard:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
+.examCardHeader { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-4); }
+.examCardTitle { font-size: var(--font-size-md); font-weight: var(--font-weight-bold); color: var(--color-text-heading); }
+.examCardMeta { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-1); font-size: var(--font-size-xs); font-weight: var(--font-weight-semibold); color: var(--color-text-secondary); }
+.codeChip { background: var(--color-blue-light); border: 1.5px solid var(--color-blue); border-radius: var(--radius-sm); padding: 2px 8px; font-family: monospace; font-size: var(--font-size-xs); font-weight: var(--font-weight-bold); color: var(--color-blue-deep); letter-spacing: 0.1em; }
+.examCardFooter { display: flex; align-items: center; justify-content: space-between; }
+.examCardDate { font-size: var(--font-size-xs); color: var(--color-text-secondary); font-weight: var(--font-weight-medium); }
+.examCardActions { display: flex; align-items: center; gap: var(--space-2); }
+.emptyState { display: flex; flex-direction: column; align-items: center; gap: var(--space-4); padding: var(--space-12); background: var(--color-surface); border: var(--border-base); border-radius: var(--radius-lg); text-align: center; color: var(--color-text-secondary); }
+.emptyState svg { color: var(--color-blue); }
+.emptyState h3 { font-size: var(--font-size-xl); color: var(--color-text-heading); }
+.emptyState p { font-size: var(--font-size-base); max-width: 340px; color: var(--color-text-secondary); }
+
+/* Modal Styles */
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(16, 32, 74, 0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: var(--space-4);
+}
+
+.modalContent {
+  background: var(--color-surface);
+  border: var(--border-base);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  width: 100%;
+  max-width: 580px;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.modalWide {
+  width: min(94vw, 1200px);
+  max-width: 1320px;
+}
+
+.modalTitle {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-extrabold);
+  color: var(--color-text-heading);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.modalSubtitle {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  font-weight: var(--font-weight-semibold);
+}
+
+.modalBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.modalFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+.dangerAlert {
+  background: #FEF2F2;
+  border: 1.5px solid var(--color-red);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  color: var(--color-red);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.typedInput {
+  border: var(--border-base);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-base);
+  color: var(--color-text-main);
+  background: var(--color-surface);
+  width: 100%;
+}
+
+.typedInput:focus {
+  outline: none;
+  border-color: var(--color-red);
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.2);
+}
+
+/* Submissions list inside modal */
+.submissionsTableWrapper {
+  overflow-x: auto;
+  border: var(--border-thin);
+  border-radius: var(--radius-md);
+}
+
+@media (max-width: 1024px) {
+  .statsRow {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .statsRow {
+    grid-template-columns: 1fr;
+  }
+  .examCardHeader {
+    flex-direction: column;
+  }
+  .examCardFooter {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-3);
+  }
+  .examCardActions {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+}

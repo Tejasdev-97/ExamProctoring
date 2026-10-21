@@ -1,0 +1,213 @@
+/* LoginPage CSS Module */
+
+.page {
+  min-height: 100vh;
+  display: flex;
+  background: var(--color-page-bg);
+}
+
+/* ── Hero / Left panel ─────────────────────────────────────────────────── */
+.hero {
+  flex: 1;
+  background: var(--color-text-heading);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-16) var(--space-12);
+  position: relative;
+  overflow: hidden;
+}
+
+.heroContent {
+  position: relative;
+  z-index: 1;
+  max-width: 480px;
+}
+
+.heroBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  background: rgba(249, 115, 22, 0.2);
+  border: 1.5px solid var(--color-orange);
+  border-radius: var(--radius-full);
+  color: var(--color-orange);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin-bottom: var(--space-6);
+}
+
+.heroTitle {
+  font-size: 3.5rem;
+  font-weight: var(--font-weight-extrabold);
+  color: var(--color-text-on-dark);
+  line-height: 1.1;
+  margin-bottom: var(--space-5);
+  letter-spacing: -0.03em;
+}
+
+.heroTitle span { color: var(--color-orange); }
+
+.heroSub {
+  font-size: var(--font-size-lg);
+  color: #F8FAFC;
+  opacity: 0.95;
+  line-height: var(--line-height-relaxed);
+  margin-bottom: var(--space-8);
+}
+
+.featureList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.featureItem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  color: #FFFFFF;
+}
+
+.featureDot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--color-orange);
+  flex-shrink: 0;
+  box-shadow: 0 0 8px rgba(249, 115, 22, 0.6);
+}
+
+.heroDecoration {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 70% 30%, rgba(37,99,235,0.25) 0%, transparent 60%),
+              radial-gradient(circle at 20% 80%, rgba(249,115,22,0.15) 0%, transparent 50%);
+  pointer-events: none;
+}
+
+/* ── Form / Right panel ────────────────────────────────────────────────── */
+.formPanel {
+  width: 480px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-8);
+  border-left: var(--border-thick);
+}
+
+.formCard {
+  width: 100%;
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.formHeader {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.logoLink {
+  display: inline-block;
+  margin-bottom: var(--space-2);
+  width: fit-content;
+  text-decoration: none;
+  transition: transform var(--transition-fast);
+}
+
+.logoLink:hover {
+  transform: scale(1.04);
+}
+
+.loginLogoImg {
+  width: 54px;
+  height: 54px;
+  object-fit: contain;
+  display: block;
+}
+
+.formTitle {
+  font-size: var(--font-size-3xl);
+  font-weight: var(--font-weight-extrabold);
+  color: var(--color-text-heading);
+  letter-spacing: -0.02em;
+}
+
+.formSub {
+  font-size: var(--font-size-base);
+  color: var(--color-text-secondary);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.inputWrapper {
+  position: relative;
+}
+
+.inputIcon {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--color-text-secondary);
+  pointer-events: none;
+}
+
+.inputWithIcon {
+  padding-left: 40px !important;
+}
+
+.inputWithSuffix {
+  padding-right: 44px !important;
+}
+
+.eyeBtn {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  transition: color var(--transition-fast);
+}
+
+.eyeBtn:hover { color: var(--color-text-main); }
+
+.disclaimer {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  line-height: var(--line-height-relaxed);
+  padding: var(--space-4);
+  background: var(--color-blue-panel);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+}
+
+/* ── Responsive ────────────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .hero { display: none; }
+  .formPanel {
+    width: 100%;
+    border-left: none;
+    padding: var(--space-6) var(--space-4);
+  }
+}

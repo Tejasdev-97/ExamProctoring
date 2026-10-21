@@ -1,0 +1,37 @@
+﻿# Environment variables and secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyd
+
+# Test and coverage artifacts
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local databases
+*.sqlite
+*.sqlite3
+*.db
+
+# Local uploads and evidence
+storage/
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp

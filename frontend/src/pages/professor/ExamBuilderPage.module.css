@@ -1,0 +1,14 @@
+/* ExamBuilderPage.module.css */
+.page { display: flex; flex-direction: column; gap: var(--space-8); max-width: 800px; }
+.header { display: flex; align-items: center; gap: var(--space-4); }
+.title { font-size: var(--font-size-3xl); font-weight: var(--font-weight-extrabold); color: var(--color-text-heading); letter-spacing: -0.02em; }
+.stepper { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-4) var(--space-6); background: var(--color-surface); border: var(--border-base); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); }
+.stepItem { display: flex; align-items: center; gap: var(--space-2); }
+.stepCircle { width: 32px; height: 32px; border-radius: 50%; border: var(--border-base); background: var(--color-surface); color: var(--color-text-secondary); font-size: var(--font-size-xs); font-weight: var(--font-weight-bold); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all var(--transition-fast); }
+.stepCircle:disabled { cursor: not-allowed; opacity: 0.5; }
+.stepDone { background: var(--color-green); border-color: var(--color-green); color: #fff; }
+.stepCurrent { background: var(--color-blue); border-color: var(--color-blue); color: #fff; box-shadow: var(--shadow-blue); }
+.stepLabel { font-size: var(--font-size-xs); font-weight: var(--font-weight-semibold); color: var(--color-text-secondary); white-space: nowrap; }
+.stepLabelCurrent { color: var(--color-blue); font-weight: var(--font-weight-bold); }
+.stepArrow { color: var(--color-border-light); flex-shrink: 0; }
+.stepContent { background: var(--color-surface); border: var(--border-base); border-radius: var(--radius-xl); padding: var(--space-8); box-shadow: var(--shadow-md); }
