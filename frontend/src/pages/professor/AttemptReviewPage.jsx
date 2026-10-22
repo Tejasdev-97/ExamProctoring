@@ -8,7 +8,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   FileText, ArrowLeft, AlertTriangle, CheckCircle, Camera, Award,
-  RotateCcw, Edit3, Save, Check, RefreshCw, HelpCircle, Eye, ShieldCheck,
+  RotateCcw, Edit3, Save, Check, RefreshCw, HelpCircle, Eye, ShieldCheck, Monitor,
 } from 'lucide-react';
 import api from '../../services/api';
 import { useToast } from '../../contexts/ToastContext';
@@ -650,12 +650,13 @@ export default function AttemptReviewPage() {
                             {evSnap ? (
                               <button
                                 type="button"
-                                className="btn btn-secondary btn-sm"
+                                className={`btn ${evSnap.capture_reason?.startsWith('screen') ? 'btn-outline-primary' : 'btn-secondary'} btn-sm`}
                                 style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', fontSize: '11px' }}
                                 onClick={() => setSelectedEvidence(evSnap)}
-                                title="Inspect snapshot evidence"
+                                title={evSnap.capture_reason?.startsWith('screen') ? 'Inspect screen snapshot evidence' : 'Inspect camera snapshot evidence'}
                               >
-                                <Camera size={12} /> View Snapshot
+                                {evSnap.capture_reason?.startsWith('screen') ? <Monitor size={12} /> : <Camera size={12} />}
+                                {evSnap.capture_reason?.startsWith('screen') ? 'View Screen Snapshot' : 'View Snapshot'}
                               </button>
                             ) : (
                               <span style={{ color: 'var(--color-text-secondary)', fontSize: '11px' }}>—</span>

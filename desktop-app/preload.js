@@ -38,4 +38,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // App metadata
   getAppVersion: () => ipcRenderer.invoke('app:get-version'),
   getPlatform: () => process.platform,
+
+  // Screen monitoring and focus evidence capture (exam-scoped)
+  initScreenCaptureSession: (params) => ipcRenderer.invoke('screen-capture:init-session', params),
+  requestScreenCapture: (params) => ipcRenderer.invoke('screen-capture:capture', params),
+  stopScreenCaptureSession: () => ipcRenderer.invoke('screen-capture:stop-session'),
 });

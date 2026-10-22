@@ -5,7 +5,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Camera, CheckCircle, XCircle, AlertTriangle, ArrowRight, RefreshCw, Maximize2 } from 'lucide-react';
+import { Camera, CheckCircle, XCircle, AlertTriangle, ArrowRight, RefreshCw, Maximize2, Monitor } from 'lucide-react';
 import api from '../../services/api';
 import { examPackageRepo, attemptRepo } from '../../storage/repositories';
 import { useToast } from '../../contexts/ToastContext';
@@ -141,6 +141,7 @@ export default function ReadinessPage() {
 
   const [showConsentModal, setShowConsentModal] = useState(false);
   const [fullscreenError, setFullscreenError] = useState('');
+  const [screenConsent, setScreenConsent] = useState(true);
 
   const handleStart = () => {
     setShowConsentModal(true);
@@ -157,6 +158,16 @@ export default function ReadinessPage() {
     setStarting(true);
     setFullscreenError('');
     try {
+      // 0. Persist screen monitoring consent and initialize session
+      await attemptRepo.patch(attemptId, { screen_monitoring_consented: screenConsent });
+      if (typeof window !== 'undefined' && window.electronAPI?.initScreenCaptureSession) {
+        try {
+          await window.electronAPI.initScreenCaptureSession({ attemptId, consented: screenConsent });
+        } catch (initErr) {
+          console.warn('[Screen Monitoring] Failed to initialize Electron capture session:', initErr);
+        }
+      }
+
       // 1. Request native fullscreen in Electron and verify
       if (typeof window !== 'undefined' && window.electronAPI?.setFullscreen) {
         await window.electronAPI.setFullscreen(true);
@@ -377,6 +388,54 @@ export default function ReadinessPage() {
                   <span>{fullscreenError}</span>
                 </div>
               )}
+
+              {/* Screen Monitoring & Focus Evidence Disclosure */}
+              <div
+                style={{
+                  background: 'var(--color-surface-alt)',
+                  border: '1px solid var(--border-base, rgba(255,255,255,0.08))',
+                  borderRadius: 'var(--radius-md)',
+                  padding: 'var(--space-3)',
+                  marginBottom: 'var(--space-3)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: 'var(--space-2)' }}>
+                  <Monitor size={16} color="var(--color-blue)" />
+                  <strong style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-heading)' }}>
+                    Screen Monitoring & Focus Evidence Disclosure
+                  </strong>
+                </div>
+                <p style={{ fontSize: '11px', color: 'var(--color-text-secondary)', lineHeight: 1.45, margin: 0 }}>
+                  • <strong>What is captured:</strong> A static snapshot of the desktop screen if you leave, switch away from, or minimize the active exam window.<br />
+                  • <strong>When:</strong> Only during sustained focus-loss episodes exceeding 2–3 seconds.<br />
+                  • <strong>Why:</strong> Contextual evidence for instructor review. No automated grade penalties or cheating determinations are made without human review.<br />
+                  • <strong>Privacy & Storage:</strong> Stored locally on this device, synchronized securely upon reconnection, accessible strictly to authorized professors.
+                </p>
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '8px',
+                    cursor: 'pointer',
+                    fontSize: 'var(--font-size-xs)',
+                    marginTop: 'var(--space-2)',
+                    fontWeight: 600,
+                    color: 'var(--color-text-primary)',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    id="chk-screen-monitoring-consent"
+                    checked={screenConsent}
+                    onChange={(e) => setScreenConsent(e.target.checked)}
+                    style={{ marginTop: 2 }}
+                  />
+                  <span>
+                    I understand and grant affirmative consent for automated screen evidence capture during sustained focus loss.
+                  </span>
+                </label>
+              </div>
+
               <p style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--font-size-sm)' }}>
                 Click below to enter fullscreen and begin your examination session.
               </p>

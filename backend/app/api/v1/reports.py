@@ -288,10 +288,10 @@ def build_attempt_pdf_data(attempt, exam, student, events, snapshots, with_image
         counts[e.event_type] = counts.get(e.event_type, 0) + 1
         meta = e.meta or {}
         ev: dict
-        if e.event_type not in EVIDENCE_TYPES:
+        snaps = sorted(by_event.get(e.event_id, []), key=lambda s: s.client_captured_at)
+        if e.event_type not in EVIDENCE_TYPES and not snaps:
             ev = {"state": "not_applicable"}
         else:
-            snaps = sorted(by_event.get(e.event_id, []), key=lambda s: s.client_captured_at)
             if not snaps:
                 msg = ("Evidence could not be captured on the student's device."
                        if meta.get("evidence_unavailable") else "No snapshot has been received for this event.")
@@ -303,7 +303,8 @@ def build_attempt_pdf_data(attempt, exam, student, events, snapshots, with_image
                 else:
                     data, state, msg = None, ("image" if snap.storage_status == "uploaded" else "pending"), ""
                 ev = {"state": state, "image_bytes": data, "message": msg,
-                      "captured": _fmt_dt(snap.client_captured_at), "snapshot_id": snap.snapshot_id}
+                      "captured": _fmt_dt(snap.client_captured_at), "snapshot_id": snap.snapshot_id,
+                      "capture_reason": getattr(snap, "capture_reason", "evidence")}
         event_rows.append({
             "label": e.event_type,
             "status": e.event_status,

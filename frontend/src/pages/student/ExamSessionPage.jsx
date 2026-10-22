@@ -17,12 +17,13 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
-import { AlertTriangle, CheckCircle, ChevronLeft, ChevronRight, Send, X, Camera, Maximize2, Minimize2, RefreshCw } from 'lucide-react';
+import { AlertTriangle, CheckCircle, ChevronLeft, ChevronRight, Send, X, Camera, Maximize2, Minimize2, RefreshCw, Monitor } from 'lucide-react';
 
 import api from '../../services/api';
 import { examPackageRepo, attemptRepo, answerRepo, eventRepo } from '../../storage/repositories';
 import { enqueueOperation, getOperationForEntity } from '../../storage/outbox';
 import { useProctoring } from '../../proctoring/useProctoring';
+import { useScreenMonitoring } from '../../proctoring/screenMonitoring';
 import { useSyncWorker } from '../../workers/useSyncWorker';
 import SyncRecoveryPanel from '../../components/sync/SyncRecoveryPanel';
 import styles from './ExamSessionPage.module.css';
@@ -175,6 +176,21 @@ export default function ExamSessionPage() {
     enabled: !submitted,
   });
 
+  // Screen monitoring and focus evidence capture (independent lifecycle)
+  const {
+    state: screenMonitorState,
+    activeWarning: screenWarning,
+    onFocusLost: notifyScreenFocusLost,
+    onFocusRestored: notifyScreenFocusRestored,
+    onPageHidden: notifyScreenPageHidden,
+    dismissWarning: dismissScreenWarning,
+    stopScreenMonitoring,
+  } = useScreenMonitoring({
+    attemptId,
+    consented: attempt?.screen_monitoring_consented ?? true,
+    enabled: !submitted,
+  });
+
   // Background sync (ordered operations, durable evidence, server-confirmed submission)
   const { syncStatus, syncDetail, syncNow, submissionState } = useSyncWorker(attemptId);
   const [showSyncPanel, setShowSyncPanel] = useState(false);
@@ -320,9 +336,11 @@ export default function ExamSessionPage() {
     if (submittingRef.current) return; // repeated clicks / timer + click
     submittingRef.current = true;
     setSubmitLoading(true);
+    stopScreenMonitoring();
     try {
       const current = await attemptRepo.get(attemptId);
       if (current && (current.status === 'submitted' || current.status === 'submitted_local')) {
+        stopScreenMonitoring();
         stopCamera();
         setSubmitted(true);
         setShowSubmitModal(false);
@@ -334,6 +352,7 @@ export default function ExamSessionPage() {
       await flushEvents();
 
       // Stop camera tracks and frame loop immediately upon submission
+      stopScreenMonitoring();
       stopCamera();
       if (typeof window !== 'undefined' && window.electronAPI?.setFullscreen) {
         window.electronAPI.setFullscreen(false);
@@ -450,13 +469,15 @@ export default function ExamSessionPage() {
     if (activeBlurEpisodeRef.current || pendingBlurTimerRef.current) return;
 
     const blurIso = data?.timestamp || new Date().toISOString();
+    const eventId = uuidv4();
     console.log('[Proctoring Diagnostic] Window focus lost; starting debounce verification (1200ms)...');
+
+    notifyScreenFocusLost({ timestamp: blurIso, eventId });
 
     pendingBlurTimerRef.current = setTimeout(async () => {
       pendingBlurTimerRef.current = null;
       if (submittingRef.current || submitted) return;
 
-      const eventId = uuidv4();
       activeBlurEpisodeRef.current = {
         eventId,
         startedAt: blurIso,
@@ -478,10 +499,13 @@ export default function ExamSessionPage() {
         console.warn('Failed to record candidate window_blur event', e);
       }
     }, 1200);
-  }, [attemptId, submitted]);
+  }, [attemptId, submitted, notifyScreenFocusLost]);
 
   // Window focus handler (closes active focus-loss episodes and cancels false alarms)
   const handleWindowFocusDetected = useCallback(async () => {
+    // Notify screen monitoring that focus has been restored
+    notifyScreenFocusRestored();
+
     // 1. If focus returned during debounce grace period (<1200ms), cancel without recording misconduct
     if (pendingBlurTimerRef.current) {
       clearTimeout(pendingBlurTimerRef.current);
@@ -621,11 +645,19 @@ export default function ExamSessionPage() {
     };
     document.addEventListener('fullscreenchange', handleHtmlFsChange);
 
+    const handleVisibilityChange = () => {
+      if (document.hidden && !submittingRef.current && !submitted) {
+        notifyScreenPageHidden({ timestamp: new Date().toISOString() });
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     return () => {
       unsubFs();
       unsubBlur();
       unsubFocus();
       document.removeEventListener('fullscreenchange', handleHtmlFsChange);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       if (pendingBlurTimerRef.current) {
         clearTimeout(pendingBlurTimerRef.current);
         pendingBlurTimerRef.current = null;
@@ -635,7 +667,7 @@ export default function ExamSessionPage() {
         countdownIntervalRef.current = null;
       }
     };
-  }, [attemptId, submitted]);
+  }, [attemptId, submitted, notifyScreenPageHidden]);
 
 
   // ── Submission confirmation screen ────────────────────────────────────
@@ -1036,6 +1068,31 @@ export default function ExamSessionPage() {
 
         {/* Active warnings */}
         <div className={`${styles.warningsList} ${cameraExpanded ? styles.warningsAboveOverlay : ''}`}>
+          {screenWarning && (
+            <div
+              className={`warning-card ${screenWarning.severity === 'critical' ? 'warning-card-critical' : ''} ${styles.warnCard}`}
+              style={{ borderLeft: '4px solid var(--color-orange)' }}
+              role="alert"
+            >
+              <Monitor size={18} style={{ flexShrink: 0, color: screenWarning.severity === 'critical' ? 'var(--color-red)' : 'var(--color-orange)' }} />
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <span style={{ fontSize: 'var(--font-size-xs)', fontWeight: 700, color: 'var(--color-text-heading)' }}>
+                  {screenWarning.title}
+                </span>
+                <span style={{ fontSize: '11px', color: 'var(--color-text-secondary)', lineHeight: 1.4 }}>
+                  {screenWarning.message}
+                </span>
+              </div>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={dismissScreenWarning}
+                aria-label="Dismiss warning"
+                style={{ padding: '2px 6px', minWidth: 0, flexShrink: 0 }}
+              >
+                <X size={14} />
+              </button>
+            </div>
+          )}
           {activeWarnings.map((w) => (
             <WarningCard key={w.id} warning={w} onDismiss={dismissWarning} />
           ))}

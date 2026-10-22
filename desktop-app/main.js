@@ -4,7 +4,7 @@
  * native fullscreen enforcement, focus tracking, and camera permissions.
  */
 
-const { app, BrowserWindow, ipcMain, session } = require('electron');
+const { app, BrowserWindow, ipcMain, session, desktopCapturer } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -186,6 +186,127 @@ ipcMain.handle('window:get-fullscreen', () => {
 
 ipcMain.handle('app:get-version', () => {
   return app.getVersion();
+});
+
+// ── Screen Monitoring & Focus Evidence Capture Coordinator ─────────────────
+let screenCaptureSession = {
+  attemptId: null,
+  consented: false,
+  status: 'idle', // 'idle' | 'active' | 'stopped'
+  capturedEventIds: new Set(),
+};
+
+async function captureScreenThumbnail() {
+  if (!desktopCapturer || typeof desktopCapturer.getSources !== 'function') {
+    throw new Error('desktopCapturer is unavailable in this environment');
+  }
+  const sources = await desktopCapturer.getSources({
+    types: ['screen'],
+    thumbnailSize: { width: 1280, height: 720 },
+  });
+  if (!sources || sources.length === 0) {
+    throw new Error('No screen display source available for capture');
+  }
+  const primarySource = sources[0];
+  const thumbnail = primarySource.thumbnail;
+  if (!thumbnail || thumbnail.isEmpty()) {
+    throw new Error('Screen capture resulted in empty thumbnail');
+  }
+  const size = thumbnail.getSize();
+  const jpegBuffer = thumbnail.toJPEG(75);
+  return {
+    base64: jpegBuffer.toString('base64'),
+    width: size.width,
+    height: size.height,
+    mimeType: 'image/jpeg',
+    sizeBytes: jpegBuffer.length,
+    sourceName: primarySource.name || 'Primary Display',
+  };
+}
+
+ipcMain.handle('screen-capture:init-session', (_event, params) => {
+  const { attemptId, consented } = params || {};
+  if (!attemptId || typeof attemptId !== 'string') {
+    return { success: false, error: 'Invalid attempt ID' };
+  }
+  screenCaptureSession = {
+    attemptId,
+    consented: Boolean(consented),
+    status: 'active',
+    capturedEventIds: new Set(),
+  };
+  console.log(`[Screen Monitoring] Initialized session for attempt: ${attemptId} (consented: ${screenCaptureSession.consented})`);
+  return { success: true, status: 'active', consented: screenCaptureSession.consented };
+});
+
+ipcMain.handle('screen-capture:capture', async (_event, params) => {
+  const { attemptId, eventId, requestId, reason } = params || {};
+  if (screenCaptureSession.status !== 'active') {
+    return {
+      success: false,
+      error: `Screen capture session is not active (${screenCaptureSession.status})`,
+      requestId,
+      eventId,
+      attemptId,
+    };
+  }
+  if (screenCaptureSession.attemptId !== attemptId) {
+    return {
+      success: false,
+      error: 'Unauthorized attempt ID for active session',
+      requestId,
+      eventId,
+      attemptId,
+    };
+  }
+  if (!screenCaptureSession.consented) {
+    return {
+      success: false,
+      error: 'Screen capture consent was not granted for this examination',
+      requestId,
+      eventId,
+      attemptId,
+    };
+  }
+  if (screenCaptureSession.capturedEventIds.has(eventId)) {
+    return {
+      success: false,
+      error: `Screenshot already captured for event: ${eventId}`,
+      requestId,
+      eventId,
+      attemptId,
+    };
+  }
+
+  try {
+    const result = await captureScreenThumbnail();
+    screenCaptureSession.capturedEventIds.add(eventId);
+    console.log(`[Screen Monitoring] Successfully captured evidence for event: ${eventId} (${result.width}x${result.height}, ${result.sizeBytes} bytes)`);
+    return {
+      success: true,
+      data: result,
+      requestId,
+      eventId,
+      attemptId,
+      reason: reason || 'focus_loss',
+    };
+  } catch (err) {
+    console.warn(`[Screen Monitoring] Capture failed for event ${eventId}:`, err.message);
+    return {
+      success: false,
+      error: err.message || 'Screen capture execution failed',
+      requestId,
+      eventId,
+      attemptId,
+    };
+  }
+});
+
+ipcMain.handle('screen-capture:stop-session', () => {
+  screenCaptureSession.status = 'stopped';
+  screenCaptureSession.capturedEventIds.clear();
+  console.log('[Screen Monitoring] Stopped screen capture session; all pending captures disarmed.');
+  return { success: true };
 });
 
 // App lifecycle

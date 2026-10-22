@@ -6,7 +6,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { Camera, CheckCircle, AlertTriangle, AlertCircle, Clock, Maximize2 } from 'lucide-react';
+import { Camera, CheckCircle, AlertTriangle, AlertCircle, Clock, Maximize2, Monitor } from 'lucide-react';
 import api from '../../services/api';
 
 async function computeBlobSha256(blob) {
@@ -221,6 +221,10 @@ export default function SnapshotThumbnail({
 
       {/* Integrity & Status Badges */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
+        <span className={`badge ${snapshot.capture_reason?.startsWith('screen') ? 'badge-blue' : 'badge-purple'}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+          {snapshot.capture_reason?.startsWith('screen') ? <Monitor size={10} /> : <Camera size={10} />}
+          {snapshot.capture_reason?.startsWith('screen') ? 'Screen Capture' : 'Webcam'}
+        </span>
         <span className={`badge ${snapshot.storage_status === 'uploaded' ? 'badge-green' : snapshot.storage_status === 'failed' ? 'badge-red' : 'badge-yellow'}`}>
           {snapshot.storage_status}
         </span>

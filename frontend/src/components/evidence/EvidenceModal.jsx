@@ -7,7 +7,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { X, AlertTriangle, Clock, Copy, Check, ShieldCheck, RefreshCw, ChevronDown } from 'lucide-react';
+import { X, AlertTriangle, Clock, Copy, Check, ShieldCheck, RefreshCw, ChevronDown, Monitor, Camera } from 'lucide-react';
 import api from '../../services/api';
 
 async function computeBlobSha256(blob) {
@@ -192,6 +192,10 @@ export default function EvidenceModal({ evidence, onClose }) {
               >
                 Evidence Review: {evidence.capture_reason ? evidence.capture_reason.replace(/_/g, ' ') : 'Proctoring Event'}
               </h3>
+              <span className={`badge ${evidence.capture_reason?.startsWith('screen') ? 'badge-blue' : 'badge-purple'}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                {evidence.capture_reason?.startsWith('screen') ? <Monitor size={11} /> : <Camera size={11} />}
+                {evidence.capture_reason?.startsWith('screen') ? 'Screen Capture' : 'Webcam Evidence'}
+              </span>
               <span className={`badge ${
                 integrity === 'verified' ? 'badge-green' :
                 integrity === 'mismatch' ? 'badge-red' :
