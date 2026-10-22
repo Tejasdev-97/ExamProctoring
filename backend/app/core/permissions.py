@@ -4,7 +4,7 @@ FastAPI dependencies that verify authenticated user roles.
 """
 
 from typing import Annotated
-from fastapi import Depends, Cookie
+from fastapi import Depends, Cookie, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from app.core.security import decode_access_token
@@ -16,11 +16,15 @@ security = HTTPBearer(auto_error=False)
 def _extract_token(
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
     access_token: str | None = Cookie(default=None),
+    token: str | None = Query(default=None),
+    access_token_query: str | None = Query(default=None, alias="access_token"),
 ) -> str | None:
-    """Extract token from Bearer header or httpOnly cookie."""
+    """Extract token from Bearer header, httpOnly cookie, or query parameter."""
     if credentials:
         return credentials.credentials
-    return access_token
+    if access_token:
+        return access_token
+    return token or access_token_query
 
 
 def get_current_user(

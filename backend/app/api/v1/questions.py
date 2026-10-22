@@ -350,8 +350,15 @@ def _resolve_template_path() -> Path:
 async def download_template(
     exam_id: str,
     actor: ProfessorUser,
+    db: AsyncSession = Depends(get_db),
 ):
     """Return Excel template for question import."""
+    stmt = select(Exam).where(Exam.exam_id == exam_id)
+    exam: Exam | None = (await db.execute(stmt)).scalars().first()
+    if not exam:
+        raise NotFoundError("Exam")
+    _check_professor_owns_exam(exam, actor)
+
     template_path = _resolve_template_path()
     if not template_path.is_file():
         raise AppError(404, "TEMPLATE_NOT_FOUND", "Question template file is missing on the server.")

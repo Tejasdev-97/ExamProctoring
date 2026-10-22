@@ -35,6 +35,7 @@ export default function QuestionsStep({ exam, onNext, onBack }) {
   const [showForm, setShowForm]       = useState(false);
   const [importPreview, setImportPreview] = useState(null);
   const [importing, setImporting]     = useState(false);
+  const [downloadingTemplate, setDownloadingTemplate] = useState(false);
 
   const [form, setForm] = useState({ question_type: 'mcq', question_text: '', marks: 1, options: { A: '', B: '', C: '', D: '' }, correct_option: 'A' });
 
@@ -105,8 +106,28 @@ export default function QuestionsStep({ exam, onNext, onBack }) {
     } catch { toast('Confirm import failed.', 'error'); }
   };
 
-  const downloadTemplate = () => {
-    window.open(`${api.defaults.baseURL}/exams/${exam.exam_id}/questions/template`, '_blank');
+  const downloadTemplate = async () => {
+    setDownloadingTemplate(true);
+    try {
+      const res = await api.get(`/exams/${exam.exam_id}/questions/template`, {
+        responseType: 'blob',
+      });
+      const blob = new Blob([res.data], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'questions_template.xlsx';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      toast(err?.response?.data?.error?.message || 'Template download failed.', 'error');
+    } finally {
+      setDownloadingTemplate(false);
+    }
   };
 
   return (
@@ -116,8 +137,13 @@ export default function QuestionsStep({ exam, onNext, onBack }) {
           Questions ({questions.length})
         </h2>
         <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
-          <button className="btn btn-secondary btn-sm" onClick={downloadTemplate} id="btn-download-template">
-            <Download size={14} /> Template
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={downloadTemplate}
+            disabled={downloadingTemplate}
+            id="btn-download-template"
+          >
+            <Download size={14} /> {downloadingTemplate ? 'Downloading…' : 'Template'}
           </button>
           <button className="btn btn-secondary btn-sm" onClick={() => fileRef.current?.click()} disabled={importing} id="btn-import-excel">
             <Upload size={14} /> {importing ? 'Importing…' : 'Import Excel'}
