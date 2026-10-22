@@ -17,8 +17,9 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
-import { AlertTriangle, CheckCircle, ChevronLeft, ChevronRight, Send, X, Camera, Maximize2, Minimize2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle, ChevronLeft, ChevronRight, Send, X, Camera, Maximize2, Minimize2, RefreshCw } from 'lucide-react';
 
+import api from '../../services/api';
 import { examPackageRepo, attemptRepo, answerRepo } from '../../storage/repositories';
 import { enqueueOperation, getOperationForEntity } from '../../storage/outbox';
 import { useProctoring } from '../../proctoring/useProctoring';
@@ -153,6 +154,9 @@ export default function ExamSessionPage() {
   const [cameraExpanded, setCameraExpanded] = useState(false);
   const [deadlineMs, setDeadlineMs] = useState(null);
   const submittingRef = useRef(false);
+  const examReadyRef = useRef(false);
+  const [loadError, setLoadError] = useState(null);
+  const [loadingPkg, setLoadingPkg] = useState(true);
 
   // Fullscreen integrity and offline warning state
   const [fullscreenWarningActive, setFullscreenWarningActive] = useState(false);
@@ -181,13 +185,55 @@ export default function ExamSessionPage() {
     return () => window.removeEventListener('keydown', onKey);
   }, [cameraExpanded]);
 
-  // Load exam package and attempt
-  useEffect(() => {
-    (async () => {
-      const [localPkg, localAttempt] = await Promise.all([
+  // Load exam package and attempt, with remote server recovery when not present in local storage
+  const loadExamSession = useCallback(async () => {
+    setLoadingPkg(true);
+    setLoadError(null);
+    try {
+      let [localPkg, localAttempt] = await Promise.all([
         examPackageRepo.get(attemptId),
         attemptRepo.get(attemptId),
       ]);
+
+      // If attempt is missing locally, query server to restore attempt metadata
+      if (!localAttempt) {
+        try {
+          const { data } = await api.get('/attempts/my-attempts');
+          const serverAttempts = data?.data || [];
+          const found = serverAttempts.find((a) => a.attempt_id === attemptId);
+          if (found) {
+            localAttempt = found;
+            await attemptRepo.save(found);
+          }
+        } catch (e) {
+          console.warn('Could not fetch server attempt details', e?.message);
+        }
+      }
+
+      // If package is missing locally, download from server using exam_id
+      if (!localPkg && localAttempt?.exam_id) {
+        try {
+          const { data } = await api.get(
+            `/exams/${localAttempt.exam_id}/package?attempt_id=${attemptId}`
+          );
+          if (data?.data) {
+            localPkg = { attempt_id: attemptId, ...data.data };
+            await examPackageRepo.save(localPkg);
+          }
+        } catch (e) {
+          console.warn('Could not download exam package from server', e?.message);
+          const errMsg = e?.response?.data?.error?.message || e?.response?.data?.detail || e?.message;
+          if (e?.response?.status === 403) {
+            throw new Error('This examination attempt is not authorized or has already ended.');
+          }
+          throw new Error(errMsg || 'Failed to download examination questions. Please check your network connection.');
+        }
+      }
+
+      if (!localPkg) {
+        throw new Error('Examination package unavailable. Please check your network connection or contact your professor.');
+      }
+
       setPkg(localPkg);
       setAttempt(localAttempt);
 
@@ -196,8 +242,7 @@ export default function ExamSessionPage() {
         setSubmitted(true);
       }
 
-      // Persisted absolute deadline: computed once from the recorded start, then reused on
-      // every reload so the timer can neither reset nor be extended by reloading.
+      // Persisted absolute deadline
       if (localPkg && localAttempt) {
         let dl = localAttempt.deadline_at ? Date.parse(localAttempt.deadline_at) : NaN;
         if (!Number.isFinite(dl)) {
@@ -217,8 +262,17 @@ export default function ExamSessionPage() {
       const map = {};
       saved.forEach((a) => { map[a.question_id] = a; });
       setAnswers(map);
-    })();
-  }, [attemptId]);
+    } catch (err) {
+      console.error('Failed to load exam session:', err);
+      setLoadError(err.message || 'Unable to load examination session.');
+    } finally {
+      setLoadingPkg(false);
+    }
+  }, [attemptId, stopCamera]);
+
+  useEffect(() => {
+    loadExamSession();
+  }, [loadExamSession]);
 
   const currentQuestion = pkg?.questions?.[currentIndex];
   const totalQuestions  = pkg?.questions?.length || 0;
@@ -333,7 +387,8 @@ export default function ExamSessionPage() {
 
   // Fullscreen exit & grace period handler
   const handleFullscreenExitDetected = useCallback(async () => {
-    if (submittingRef.current || submitted) return;
+    if (submittingRef.current || submitted || !examReadyRef.current) return;
+    if (fullscreenWarningActive) return; // Prevent duplicate timers and duplicate outbox events
 
     setFullscreenWarningActive(true);
     setFullscreenSecondsRemaining(5);
@@ -377,11 +432,11 @@ export default function ExamSessionPage() {
         handleSubmit();
       }
     }, 1000);
-  }, [attemptId, submitted, handleSubmit]);
+  }, [attemptId, submitted, fullscreenWarningActive, handleSubmit]);
 
   // Window blur handler (distinct from fullscreen exit)
   const handleWindowBlurDetected = useCallback(async (data) => {
-    if (submittingRef.current || submitted) return;
+    if (submittingRef.current || submitted || !examReadyRef.current) return;
     const eventId = uuidv4();
     const blurIso = data?.timestamp || new Date().toISOString();
     try {
@@ -405,6 +460,13 @@ export default function ExamSessionPage() {
     }
   }, [attemptId, submitted]);
 
+  // Stable handler refs to prevent effect recreation on render
+  const exitHandlerRef = useRef(handleFullscreenExitDetected);
+  exitHandlerRef.current = handleFullscreenExitDetected;
+
+  const blurHandlerRef = useRef(handleWindowBlurDetected);
+  blurHandlerRef.current = handleWindowBlurDetected;
+
   // Online / offline event tracking
   useEffect(() => {
     const handleOnline = () => {
@@ -423,13 +485,17 @@ export default function ExamSessionPage() {
     };
   }, []);
 
-  // Electron fullscreen and window integrity lifecycle
+  // Electron fullscreen and window integrity lifecycle (stable mount effect)
   useEffect(() => {
     if (submitted) return undefined;
 
     // Enter fullscreen when active
     if (typeof window !== 'undefined' && window.electronAPI?.setFullscreen) {
-      window.electronAPI.setFullscreen(true);
+      window.electronAPI.setFullscreen(true).then(() => {
+        setTimeout(() => { examReadyRef.current = true; }, 1000);
+      });
+    } else {
+      setTimeout(() => { examReadyRef.current = true; }, 1000);
     }
 
     let unsubFs = () => {};
@@ -445,12 +511,12 @@ export default function ExamSessionPage() {
             countdownIntervalRef.current = null;
           }
         } else {
-          handleFullscreenExitDetected();
+          exitHandlerRef.current?.();
         }
       });
 
       unsubBlur = window.electronAPI.onWindowBlur((data) => {
-        handleWindowBlurDetected(data);
+        blurHandlerRef.current?.(data);
       });
     }
 
@@ -464,7 +530,7 @@ export default function ExamSessionPage() {
           countdownIntervalRef.current = null;
         }
       } else {
-        handleFullscreenExitDetected();
+        exitHandlerRef.current?.();
       }
     };
     document.addEventListener('fullscreenchange', handleHtmlFsChange);
@@ -475,12 +541,10 @@ export default function ExamSessionPage() {
       document.removeEventListener('fullscreenchange', handleHtmlFsChange);
       if (countdownIntervalRef.current) {
         clearInterval(countdownIntervalRef.current);
-      }
-      if (typeof window !== 'undefined' && window.electronAPI?.setFullscreen) {
-        window.electronAPI.setFullscreen(false);
+        countdownIntervalRef.current = null;
       }
     };
-  }, [submitted, handleFullscreenExitDetected, handleWindowBlurDetected]);
+  }, [attemptId, submitted]);
 
 
   // ── Submission confirmation screen ────────────────────────────────────
@@ -517,7 +581,27 @@ export default function ExamSessionPage() {
     );
   }
 
-  if (!pkg) {
+  if (loadError) {
+    return (
+      <div className={styles.loadingScreen}>
+        <div style={{ maxWidth: 480, textAlign: 'center', padding: 'var(--space-6)' }}>
+          <AlertTriangle size={48} color="var(--color-red)" style={{ marginBottom: 'var(--space-3)' }} />
+          <h2 style={{ color: 'var(--color-text-heading)', marginBottom: 'var(--space-2)' }}>Unable to Load Examination</h2>
+          <p style={{ color: 'var(--color-text-secondary)', marginBottom: 'var(--space-4)' }}>{loadError}</p>
+          <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+            <button className="btn btn-primary" onClick={loadExamSession}>
+              <RefreshCw size={16} /> Retry
+            </button>
+            <button className="btn btn-secondary" onClick={() => navigate('/student')}>
+              Back to Dashboard
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (loadingPkg || !pkg) {
     return (
       <div className={styles.loadingScreen}>
         <div className="spinner spinner-lg" />

@@ -7,8 +7,10 @@ import { useState } from 'react';
 import { useNavigate, Navigate, Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
-import { Eye, EyeOff, ShieldCheck, Lock, User } from 'lucide-react';
+import { Eye, EyeOff, ShieldCheck, Lock, User, ArrowLeft } from 'lucide-react';
 import styles from './LoginPage.module.css';
+
+const isElectron = typeof window !== 'undefined' && (Boolean(window.electronAPI?.isElectron) || window.location.protocol === 'file:');
 
 export default function LoginPage() {
   const { user, login, loading } = useAuth();
@@ -90,6 +92,18 @@ export default function LoginPage() {
       <div className={styles.formPanel}>
         <div className={styles.formCard}>
           <div className={styles.formHeader}>
+            {!isElectron && (
+              <div style={{ width: '100%', marginBottom: 'var(--space-2)', textAlign: 'left' }}>
+                <Link
+                  to="/"
+                  className="btn btn-ghost btn-sm"
+                  id="btn-back-home"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 8px' }}
+                >
+                  <ArrowLeft size={15} /> Back to Home
+                </Link>
+              </div>
+            )}
             <Link to="/" className={styles.logoLink} title="Back to Home">
               <img
                 src="/examproctor.ai_logo.png"

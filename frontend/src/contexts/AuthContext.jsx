@@ -58,11 +58,11 @@ export function AuthProvider({ children }) {
                 setUser(cached);
               }
             } else {
-              localStorage.removeItem('ep_access_token');
+              // Network error or offline without cached session:
+              // Preserve ep_access_token so reconnection or subsequent refresh succeeds
               setUser(null);
             }
           } catch {
-            localStorage.removeItem('ep_access_token');
             setUser(null);
           }
         }

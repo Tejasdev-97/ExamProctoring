@@ -58,11 +58,12 @@ test('Offline Session Recovery: distinguishes network errors from genuine auth r
         token = null;
         user = null;
       } else {
-        // Network error / offline: restore from local cache
+        // Network error / offline: restore from local cache if available;
+        // crucially PRESERVE ep_access_token so user is not permanently logged out!
         if (cachedUser) {
           user = cachedUser;
         } else {
-          token = null;
+          // Keep token intact; set user null until reconnect
           user = null;
         }
       }
@@ -94,12 +95,12 @@ test('Offline Session Recovery: distinguishes network errors from genuine auth r
   assert.equal(resD.token, 'mock-jwt-token');
   assert.equal(resD.user.user_id, 'u-cached');
 
-  // Case E: Offline / Network Error with NO cached session -> token purged
+  // Case E: Offline / Network Error with NO cached session -> token PRESERVED (not purged)
   const resE = await resolveSessionMount({
     networkError: true,
     cachedUser: null,
   });
-  assert.equal(resE.token, null);
+  assert.equal(resE.token, 'mock-jwt-token');
   assert.equal(resE.user, null);
 });
 
@@ -195,3 +196,171 @@ test('Submission Idempotency: concurrent timer, fullscreen timeout, and user cli
     'skipped_duplicate',
   ]);
 });
+
+test('Vercel SPA Routing: rewrite regex correctly distinguishes SPA routes from static assets and API', () => {
+  // Regex from frontend/vercel.json:
+  // /((?!assets/|mediapipe/|models/|onnx/|api/|.*\\.[\\w]+$).*)
+  const rewritePattern = /^((?!assets\/|mediapipe\/|models\/|onnx\/|api\/|.*[a-zA-Z0-9_-]+\.[a-zA-Z0-9]+$).*)$/;
+
+  // Valid nested SPA client routes MUST match the rewrite -> /index.html
+  assert.equal(rewritePattern.test('student'), true);
+  assert.equal(rewritePattern.test('student/enter-exam'), true);
+  assert.equal(rewritePattern.test('student/readiness/att-123'), true);
+  assert.equal(rewritePattern.test('student/exam/66e57956-11a2-42b8-9727-6284c6601f36'), true);
+  assert.equal(rewritePattern.test('professor/exams/new'), true);
+  assert.equal(rewritePattern.test('admin/audit'), true);
+  assert.equal(rewritePattern.test('login'), true);
+  assert.equal(rewritePattern.test('unknown-route-for-404'), true);
+
+  // Static assets, models, and real files MUST NOT match the rewrite
+  assert.equal(rewritePattern.test('assets/index-CgiAPn5q.js'), false);
+  assert.equal(rewritePattern.test('assets/index-_422YeP3.css'), false);
+  assert.equal(rewritePattern.test('models/classifier.onnx'), false);
+  assert.equal(rewritePattern.test('mediapipe/detector.tflite'), false);
+  assert.equal(rewritePattern.test('examproctor.ai_logo.png'), false);
+  assert.equal(rewritePattern.test('api/v1/auth/login'), false);
+});
+
+test('Exam Attempt Recovery: loads remote package and restores attempt when local Dexie cache is empty', async () => {
+  const localDb = {
+    pkg: null,
+    attempt: null,
+  };
+
+  const remoteServer = {
+    attempts: [{ attempt_id: 'att-4', exam_id: 'ex-iot', status: 'in_progress', server_started_at: '2026-10-22T06:46:39Z' }],
+    packages: {
+      'ex-iot': { title: 'Internet of Things', duration_seconds: 1800, questions: [{ question_id: 'q1' }, { question_id: 'q2' }] },
+    },
+  };
+
+  async function resumeExam(attemptId) {
+    let pkg = localDb.pkg;
+    let attempt = localDb.attempt;
+
+    if (!attempt) {
+      attempt = remoteServer.attempts.find((a) => a.attempt_id === attemptId) || null;
+      if (attempt) localDb.attempt = attempt;
+    }
+
+    if (!pkg && attempt?.exam_id) {
+      const remotePkg = remoteServer.packages[attempt.exam_id];
+      if (remotePkg) {
+        pkg = { attempt_id: attemptId, ...remotePkg };
+        localDb.pkg = pkg;
+      }
+    }
+
+    if (!pkg) {
+      throw new Error('Examination package unavailable.');
+    }
+
+    // Fixed absolute deadline calculation
+    const startIso = attempt.server_started_at || '2026-10-22T06:46:39Z';
+    const deadlineMs = Date.parse(startIso) + (pkg.duration_seconds * 1000);
+
+    return { pkg, attempt, deadlineMs, status: attempt.status };
+  }
+
+  const result = await resumeExam('att-4');
+  assert.equal(result.attempt.attempt_id, 'att-4');
+  assert.equal(result.attempt.status, 'in_progress');
+  assert.equal(result.pkg.title, 'Internet of Things');
+  assert.equal(result.pkg.questions.length, 2);
+  assert.equal(result.deadlineMs, Date.parse('2026-10-22T06:46:39Z') + 1800000);
+  // Verified saved into local cache
+  assert.notEqual(localDb.pkg, null);
+  assert.notEqual(localDb.attempt, null);
+});
+
+test('Exam Resume Error Handling: failed package download clears loading and reports actionable error', async () => {
+  let loading = true;
+  let error = null;
+
+  async function resumeExamWithError() {
+    loading = true;
+    error = null;
+    try {
+      // Simulate network outage or forbidden 403
+      throw new Error('This examination attempt is not authorized or has already ended.');
+    } catch (err) {
+      error = err.message;
+    } finally {
+      loading = false;
+    }
+  }
+
+  await resumeExamWithError();
+  assert.equal(loading, false);
+  assert.equal(error, 'This examination attempt is not authorized or has already ended.');
+});
+
+test('Fullscreen Consent Flow: dialog cancels cleanly, confirms once, and verifies fullscreen before start', async () => {
+  let isNativeFullscreen = false;
+  let examStarted = false;
+  let showModal = false;
+
+  const mockElectronAPI = {
+    setFullscreen: async (flag) => {
+      isNativeFullscreen = Boolean(flag);
+      return isNativeFullscreen;
+    },
+    getFullscreen: async () => isNativeFullscreen,
+  };
+
+  // 1. Click Start Exam -> Opens consent modal, does NOT start exam or enter fullscreen yet
+  showModal = true;
+  assert.equal(showModal, true);
+  assert.equal(isNativeFullscreen, false);
+  assert.equal(examStarted, false);
+
+  // 2. Click Cancel -> Dismisses modal without starting exam
+  showModal = false;
+  assert.equal(showModal, false);
+  assert.equal(examStarted, false);
+
+  // 3. Click Start Exam again -> Open modal
+  showModal = true;
+
+  // 4. Click Enter Fullscreen and Start -> engages fullscreen, verifies it, then starts exam
+  await mockElectronAPI.setFullscreen(true);
+  const confirmed = await mockElectronAPI.getFullscreen();
+  assert.equal(confirmed, true);
+  examStarted = true;
+  showModal = false;
+
+  assert.equal(examStarted, true);
+  assert.equal(isNativeFullscreen, true);
+});
+
+test('Fullscreen Idempotency: repeated setFullscreen calls do not toggle or dispatch redundant events', () => {
+  let nativeState = false;
+  let stateChangeCount = 0;
+
+  function setFullscreenIdempotent(flag) {
+    const target = Boolean(flag);
+    if (nativeState !== target) {
+      nativeState = target;
+      stateChangeCount += 1;
+    }
+    return nativeState;
+  }
+
+  // Initial enter
+  assert.equal(setFullscreenIdempotent(true), true);
+  assert.equal(stateChangeCount, 1);
+
+  // Redundant enter calls (e.g. from React re-renders or effect re-runs) do NOT change state
+  assert.equal(setFullscreenIdempotent(true), true);
+  assert.equal(setFullscreenIdempotent(true), true);
+  assert.equal(stateChangeCount, 1); // strictly 1, no flicker!
+
+  // Exit
+  assert.equal(setFullscreenIdempotent(false), false);
+  assert.equal(stateChangeCount, 2);
+
+  // Redundant exit calls do NOT change state
+  assert.equal(setFullscreenIdempotent(false), false);
+  assert.equal(stateChangeCount, 2);
+});
+

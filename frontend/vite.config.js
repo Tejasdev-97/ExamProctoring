@@ -2,7 +2,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
 export default defineConfig({
-  base: './',
+  base: process.env.VITE_BASE_URL || (process.env.VITE_ELECTRON === 'true' || process.env.ELECTRON_BUILD === 'true' ? './' : '/'),
   plugins: [react()],
   server: {
     port: 5173,

@@ -8,7 +8,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
-    "build:frontend": "npm --prefix ../frontend run build",
+    "build:frontend": "npm --prefix ../frontend run build:electron",
     "pack": "npm run build:frontend && electron-builder --dir",
     "dist": "npm run build:frontend && electron-builder --win nsis"
   },

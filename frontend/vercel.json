@@ -1,0 +1,9 @@
+{
+  "framework": "vite",
+  "rewrites": [
+    {
+      "source": "/((?!assets/|mediapipe/|models/|onnx/|api/|.*\\.[\\w]+$).*)",
+      "destination": "/index.html"
+    }
+  ]
+}

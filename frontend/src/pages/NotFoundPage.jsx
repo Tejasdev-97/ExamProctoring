@@ -46,11 +46,21 @@ export default function NotFoundPage() {
           The page you're looking for doesn't exist or has been moved.
         </p>
         <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap', justifyContent: 'center' }}>
-          <button className="btn btn-secondary" onClick={() => navigate(-1)} id="btn-go-back">
+          <button
+            className="btn btn-secondary"
+            onClick={() => {
+              if (window.history.length > 1) {
+                navigate(-1);
+              } else {
+                navigate('/');
+              }
+            }}
+            id="btn-go-back"
+          >
             <ArrowLeft size={16} /> Go back
           </button>
           <button className="btn btn-primary" onClick={() => navigate('/')} id="btn-go-home">
-            <Home size={16} /> Dashboard
+            <Home size={16} /> Home
           </button>
         </div>
       </div>

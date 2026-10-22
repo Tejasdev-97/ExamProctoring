@@ -147,7 +147,10 @@ app.on('second-instance', () => {
 // Register IPC handlers
 ipcMain.handle('window:set-fullscreen', (_event, flag) => {
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.setFullScreen(Boolean(flag));
+    const target = Boolean(flag);
+    if (mainWindow.isFullScreen() !== target) {
+      mainWindow.setFullScreen(target);
+    }
     return mainWindow.isFullScreen();
   }
   return false;

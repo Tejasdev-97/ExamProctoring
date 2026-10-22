@@ -5,7 +5,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Camera, CheckCircle, XCircle, AlertTriangle, ArrowRight, RefreshCw } from 'lucide-react';
+import { Camera, CheckCircle, XCircle, AlertTriangle, ArrowRight, RefreshCw, Maximize2 } from 'lucide-react';
 import api from '../../services/api';
 import { examPackageRepo, attemptRepo } from '../../storage/repositories';
 import { useToast } from '../../contexts/ToastContext';
@@ -134,20 +134,57 @@ export default function ReadinessPage() {
     if (allDone && critPassed) setCanStart(true);
   }, [checks]);
 
-  const handleStart = async () => {
+  const [showConsentModal, setShowConsentModal] = useState(false);
+  const [fullscreenError, setFullscreenError] = useState('');
+
+  const handleStart = () => {
+    setShowConsentModal(true);
+    setFullscreenError('');
+  };
+
+  const handleCancelConsent = () => {
+    setShowConsentModal(false);
+    setStarting(false);
+    setFullscreenError('');
+  };
+
+  const handleConfirmFullscreenAndStart = async () => {
     setStarting(true);
+    setFullscreenError('');
     try {
-      // Tell backend the exam has started
-      await api.post(`/attempts/${attemptId}/start`);
-      // Update local attempt status
+      // 1. Request native fullscreen in Electron and verify
+      if (typeof window !== 'undefined' && window.electronAPI?.setFullscreen) {
+        await window.electronAPI.setFullscreen(true);
+        const isFs = await window.electronAPI.getFullscreen();
+        if (!isFs) {
+          setFullscreenError('Fullscreen mode could not be confirmed. Please check permissions or display settings and try again.');
+          setStarting(false);
+          return;
+        }
+      } else if (document.documentElement?.requestFullscreen) {
+        try {
+          await document.documentElement.requestFullscreen();
+        } catch (fsErr) {
+          console.warn('Browser HTML5 fullscreen request:', fsErr);
+        }
+      }
+
+      // 2. Start attempt on backend
+      try {
+        await api.post(`/attempts/${attemptId}/start`);
+      } catch (err) {
+        // Even if server call fails, allow local start (offline-first continuity)
+        console.warn('Backend start returned error; continuing offline', err?.message);
+      }
+
+      // 3. Update local attempt status & navigate
       await attemptRepo.updateStatus(attemptId, 'in_progress');
       toast('Exam started. Good luck!', 'success');
       navigate(`/student/exam/${attemptId}`);
     } catch (err) {
-      // Even if server call fails, allow local start (offline-first)
-      await attemptRepo.updateStatus(attemptId, 'in_progress');
-      toast('Starting in offline mode. Your answers will sync when connected.', 'warning', 6000);
-      navigate(`/student/exam/${attemptId}`);
+      console.error('Failed to start examination:', err);
+      setFullscreenError(err?.message || 'Failed to start examination. Please try again.');
+      setStarting(false);
     }
   };
 
@@ -308,6 +345,62 @@ export default function ReadinessPage() {
           </div>
         </div>
       </div>
+
+      {/* Fullscreen User Consent Modal */}
+      {showConsentModal && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <div className="modal" style={{ maxWidth: 520 }}>
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Maximize2 size={20} color="var(--color-blue)" />
+                <h2 className="modal-title">Enter Fullscreen & Begin Exam</h2>
+              </div>
+            </div>
+            <div className="modal-body">
+              <p style={{ color: 'var(--color-text-primary)', marginBottom: 'var(--space-3)', lineHeight: 1.5 }}>
+                To ensure exam integrity, this examination requires <strong>fullscreen mode</strong>.
+              </p>
+              <div className="alert alert-warning" style={{ marginBottom: 'var(--space-3)' }}>
+                <AlertTriangle size={16} />
+                <span>
+                  Once started, exiting fullscreen or switching applications will trigger a proctoring alert with a 5-second grace window to return.
+                </span>
+              </div>
+              {fullscreenError && (
+                <div className="alert alert-error" style={{ marginBottom: 'var(--space-3)' }}>
+                  <XCircle size={16} />
+                  <span>{fullscreenError}</span>
+                </div>
+              )}
+              <p style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--font-size-sm)' }}>
+                Click below to enter fullscreen and begin your examination session.
+              </p>
+            </div>
+            <div className="modal-footer">
+              <button
+                className="btn btn-secondary"
+                onClick={handleCancelConsent}
+                disabled={starting}
+                id="btn-cancel-fullscreen"
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={handleConfirmFullscreenAndStart}
+                disabled={starting}
+                id="btn-confirm-fullscreen"
+              >
+                {starting ? (
+                  <><span className="spinner" style={{ width: 16, height: 16 }} /> Engaging Fullscreen…</>
+                ) : (
+                  <>Enter Fullscreen and Start <ArrowRight size={16} /></>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
