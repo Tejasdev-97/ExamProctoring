@@ -274,7 +274,7 @@ export function useProctoring({ videoRef, attemptId, proctoringConfig, enabled =
 
   // Load real MediaPipe models (served locally from /models) with single authoritative threshold
   const initDetector = useCallback(async () => {
-    if (isStoppedRef.current) return;
+    if (isStoppedRef.current) return { ready: false, error: 'Stopped' };
     const effectiveThreshold = proctoringConfig?.phone_detection_threshold ?? 0.65;
     const det = new FrameDetectors({
       phoneThreshold: effectiveThreshold,
@@ -284,10 +284,15 @@ export function useProctoring({ videoRef, attemptId, proctoringConfig, enabled =
     if (isStoppedRef.current) {
       det.close();
       detectorRef.current = null;
-      return;
+      return { ready: false, error: 'Stopped' };
     }
     setDetectorStatus({ ...status });
-    if (!det.ready) console.warn('[Proctoring] Detectors unavailable:', status.error);
+    if (!det.ready) {
+      console.warn('[Proctoring Diagnostic] Detectors unavailable:', status.error);
+    } else {
+      console.log('[Proctoring Diagnostic] Detectors successfully loaded:', status);
+    }
+    return status;
   }, [proctoringConfig]);
 
   // Frame processing loop (non-overlapping; real inference only)
@@ -313,7 +318,7 @@ export function useProctoring({ videoRef, attemptId, proctoringConfig, enabled =
         phoneDetections: result.phones,
       });
     } catch (e) {
-      console.warn('[Proctoring] frame error', e.message);
+      console.warn('[Proctoring Diagnostic] Frame inference warning:', e.message);
     } finally {
       isProcessingRef.current = false;
     }
@@ -321,12 +326,26 @@ export function useProctoring({ videoRef, attemptId, proctoringConfig, enabled =
 
   // Main effect: start camera + engine when enabled
   useEffect(() => {
-    if (!enabled || !videoRef?.current || !attemptId || isStoppedRef.current) return;
+    if (!enabled || !attemptId) {
+      setCameraState('idle');
+      return undefined;
+    }
+
+    const videoEl = videoRef?.current;
+    if (!videoEl) {
+      setCameraState('initializing');
+      console.log('[Proctoring Diagnostic] Waiting for video element attachment...');
+      return undefined;
+    }
 
     isStoppedRef.current = false;
+    let isCancelled = false;
+
+    setCameraState('initializing');
+    console.log(`[Proctoring Diagnostic] Starting proctoring pipeline for attempt: ${attemptId}`);
 
     const instant = (event_type, metadata = {}) => {
-      if (isStoppedRef.current) return;
+      if (isStoppedRef.current || isCancelled) return;
       const now = new Date().toISOString();
       handleCvEvent({
         event_id: uuidv4(), event_type, event_status: 'confirmed',
@@ -334,20 +353,67 @@ export function useProctoring({ videoRef, attemptId, proctoringConfig, enabled =
       });
     };
 
-    const camera = new CameraManager(videoRef.current, (state, err) => {
-      setCameraState(state);
-      if (state === 'error' && !isStoppedRef.current) instant('camera_unavailable', { error: err });
+    const camera = new CameraManager(videoEl, (state, err) => {
+      if (isCancelled || isStoppedRef.current) return;
+      if (['permission_denied', 'camera_unavailable', 'error'].includes(state)) {
+        setCameraState(state);
+        if (state === 'error' || state === 'camera_unavailable') {
+          instant('camera_unavailable', { error: err });
+        }
+      }
     });
     managerRef.current = camera;
 
     const engine = new CVEventEngine(proctoringConfig, handleCvEvent);
     engineRef.current = engine;
 
-    camera.start().catch(() => { /* state already updated */ });
-    initDetector();
+    (async () => {
+      try {
+        console.log('[Proctoring Diagnostic] 1/3 Requesting camera stream...');
+        await camera.start();
+        if (isCancelled || isStoppedRef.current) return;
 
-    const sampleInterval = proctoringConfig?.live_sampling_interval_ms ?? FRAME_INTERVAL_MS;
-    frameLoopRef.current = setInterval(runFrameLoop, sampleInterval);
+        console.log('[Proctoring Diagnostic] 2/3 Camera stream active. Initializing AI detection models...');
+        const status = await initDetector();
+        if (isCancelled || isStoppedRef.current) return;
+
+        if (!detectorRef.current?.ready) {
+          console.warn('[Proctoring Diagnostic] Detection models failed to become ready:', status?.error);
+          setCameraState('detection_error');
+          instant('camera_unavailable', { reason: 'detection_error', error: status?.error });
+          return;
+        }
+
+        console.log('[Proctoring Diagnostic] 3/3 Both camera and models ready. Pipeline fully ACTIVE.');
+        setCameraState('active');
+
+        if (frameLoopRef.current) {
+          clearInterval(frameLoopRef.current);
+        }
+        const sampleInterval = proctoringConfig?.live_sampling_interval_ms ?? FRAME_INTERVAL_MS;
+        frameLoopRef.current = setInterval(runFrameLoop, sampleInterval);
+      } catch (err) {
+        if (isCancelled || isStoppedRef.current) return;
+        const errName = err?.name || '';
+        if (errName === 'NotAllowedError' || errName === 'PermissionDeniedError') {
+          console.warn('[Proctoring Diagnostic] Camera permission denied.');
+          setCameraState('permission_denied');
+        } else if (
+          errName === 'NotFoundError' ||
+          errName === 'DevicesNotFoundError' ||
+          errName === 'NotReadableError' ||
+          errName === 'TrackStartError'
+        ) {
+          console.warn('[Proctoring Diagnostic] Camera device unavailable or in use:', err.message);
+          setCameraState('camera_unavailable');
+          instant('camera_unavailable', { error: err.message });
+        } else {
+          console.warn('[Proctoring Diagnostic] Proctoring startup failure:', err.message);
+          setCameraState('error');
+          instant('camera_unavailable', { error: err.message });
+        }
+      }
+    })();
 
     // Page visibility monitoring (recorded; a browser cannot prevent tab switching)
     const onVisibility = () => { if (document.hidden && !isStoppedRef.current) instant('page_hidden'); };
@@ -358,12 +424,13 @@ export function useProctoring({ videoRef, attemptId, proctoringConfig, enabled =
     document.addEventListener('fullscreenchange', onFullscreen);
 
     return () => {
+      isCancelled = true;
       stopCamera();
       engine.flushActiveEvents();
       document.removeEventListener('visibilitychange', onVisibility);
       document.removeEventListener('fullscreenchange', onFullscreen);
     };
-  }, [enabled, attemptId, proctoringConfig, handleCvEvent, initDetector, runFrameLoop, stopCamera]);
+  }, [enabled, attemptId, proctoringConfig, videoRef?.current, handleCvEvent, initDetector, runFrameLoop, stopCamera]);
 
   return {
     cameraState,

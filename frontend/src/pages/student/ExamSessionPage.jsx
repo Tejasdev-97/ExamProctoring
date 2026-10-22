@@ -20,7 +20,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { AlertTriangle, CheckCircle, ChevronLeft, ChevronRight, Send, X, Camera, Maximize2, Minimize2, RefreshCw } from 'lucide-react';
 
 import api from '../../services/api';
-import { examPackageRepo, attemptRepo, answerRepo } from '../../storage/repositories';
+import { examPackageRepo, attemptRepo, answerRepo, eventRepo } from '../../storage/repositories';
 import { enqueueOperation, getOperationForEntity } from '../../storage/outbox';
 import { useProctoring } from '../../proctoring/useProctoring';
 import { useSyncWorker } from '../../workers/useSyncWorker';
@@ -142,6 +142,7 @@ export default function ExamSessionPage() {
   const { attemptId } = useParams();
   const navigate = useNavigate();
   const videoRef = useRef(null);
+  const [videoMounted, setVideoMounted] = useState(false);
 
   const [pkg, setPkg] = useState(null);           // exam package
   const [attempt, setAttempt] = useState(null);
@@ -168,6 +169,7 @@ export default function ExamSessionPage() {
   // CV proctoring
   const { cameraState, activeWarnings, eventCount, dismissWarning, flushEvents, storageWarning, stopCamera } = useProctoring({
     videoRef,
+    videoMounted,
     attemptId,
     proctoringConfig: pkg?.proctoring_config,
     enabled: !submitted,
@@ -434,31 +436,107 @@ export default function ExamSessionPage() {
     }, 1000);
   }, [attemptId, submitted, fullscreenWarningActive, handleSubmit]);
 
-  // Window blur handler (distinct from fullscreen exit)
-  const handleWindowBlurDetected = useCallback(async (data) => {
+  const pendingBlurTimerRef = useRef(null);
+  const activeBlurEpisodeRef = useRef(null);
+
+  // Window blur handler (debounced, distinct from fullscreen transitions)
+  const handleWindowBlurDetected = useCallback((data) => {
     if (submittingRef.current || submitted || !examReadyRef.current) return;
-    const eventId = uuidv4();
-    const blurIso = data?.timestamp || new Date().toISOString();
-    try {
-      await enqueueOperation({
-        operationId: uuidv4(),
-        attemptId,
-        operationType: 'event_upsert',
-        entityId: eventId,
-        payload: {
-          event_id: eventId,
-          event_type: 'window_blur',
-          event_status: 'confirmed',
-          client_started_at: blurIso,
-          client_ended_at: blurIso,
-          duration_ms: 0,
-          metadata: { reason: 'window_focus_loss_detected', attempt_id: attemptId },
-        },
-      });
-    } catch (e) {
-      console.warn('Failed to record window_blur event', e);
+    if (data?.isFullscreenTransition) {
+      console.log('[Proctoring Diagnostic] Suppressed transient window blur during fullscreen mode transition.');
+      return;
     }
+    // If an episode or debounce timer is already running for the same continuous loss of focus, ignore duplicate
+    if (activeBlurEpisodeRef.current || pendingBlurTimerRef.current) return;
+
+    const blurIso = data?.timestamp || new Date().toISOString();
+    console.log('[Proctoring Diagnostic] Window focus lost; starting debounce verification (1200ms)...');
+
+    pendingBlurTimerRef.current = setTimeout(async () => {
+      pendingBlurTimerRef.current = null;
+      if (submittingRef.current || submitted) return;
+
+      const eventId = uuidv4();
+      activeBlurEpisodeRef.current = {
+        eventId,
+        startedAt: blurIso,
+      };
+
+      try {
+        await eventRepo.save({
+          event_id: eventId,
+          attempt_id: attemptId,
+          event_type: 'window_blur',
+          event_status: 'candidate',
+          client_started_at: blurIso,
+          client_ended_at: null,
+          duration_ms: null,
+          metadata: { reason: 'window_focus_loss_detected', attempt_id: attemptId },
+        });
+        console.log('[Proctoring Diagnostic] Genuine focus loss confirmed; candidate episode recorded.');
+      } catch (e) {
+        console.warn('Failed to record candidate window_blur event', e);
+      }
+    }, 1200);
   }, [attemptId, submitted]);
+
+  // Window focus handler (closes active focus-loss episodes and cancels false alarms)
+  const handleWindowFocusDetected = useCallback(async () => {
+    // 1. If focus returned during debounce grace period (<1200ms), cancel without recording misconduct
+    if (pendingBlurTimerRef.current) {
+      clearTimeout(pendingBlurTimerRef.current);
+      pendingBlurTimerRef.current = null;
+      console.log('[Proctoring Diagnostic] Transient focus loss returned within grace window; no misconduct recorded.');
+    }
+
+    // 2. If a genuine episode was open, compute duration and finalize
+    if (activeBlurEpisodeRef.current) {
+      const { eventId, startedAt } = activeBlurEpisodeRef.current;
+      activeBlurEpisodeRef.current = null;
+      const nowIso = new Date().toISOString();
+      const durationMs = Math.max(0, Date.now() - new Date(startedAt).getTime());
+      console.log(`[Proctoring Diagnostic] Window focus restored after ${durationMs}ms`);
+
+      if (durationMs >= 1000) {
+        try {
+          const payload = {
+            event_id: eventId,
+            event_type: 'window_blur',
+            event_status: 'confirmed',
+            client_started_at: startedAt,
+            client_ended_at: nowIso,
+            duration_ms: durationMs,
+            metadata: {
+              reason: 'window_focus_loss_detected',
+              attempt_id: attemptId,
+              duration_seconds: Math.round(durationMs / 1000),
+            },
+          };
+          await eventRepo.save(payload);
+          await enqueueOperation({
+            operationId: uuidv4(),
+            attemptId,
+            operationType: 'event_upsert',
+            entityId: eventId,
+            payload,
+          });
+        } catch (e) {
+          console.warn('Failed to record finalized window_blur event', e);
+        }
+      }
+    }
+
+    // 3. If window is focused and in fullscreen, clear any pending fullscreen warning
+    if (typeof window !== 'undefined' && window.electronAPI?.getFullscreen) {
+      window.electronAPI.getFullscreen().then((isFs) => {
+        if (isFs && countdownIntervalRef.current) {
+          setFullscreenWarningActive(false);
+          clearInterval(countdownIntervalRef.current);
+          countdownIntervalRef.current = null;
+        }
+      }).catch(() => {});
+    }
+  }, [attemptId]);
 
   // Stable handler refs to prevent effect recreation on render
   const exitHandlerRef = useRef(handleFullscreenExitDetected);
@@ -466,6 +544,9 @@ export default function ExamSessionPage() {
 
   const blurHandlerRef = useRef(handleWindowBlurDetected);
   blurHandlerRef.current = handleWindowBlurDetected;
+
+  const focusHandlerRef = useRef(handleWindowFocusDetected);
+  focusHandlerRef.current = handleWindowFocusDetected;
 
   // Online / offline event tracking
   useEffect(() => {
@@ -500,6 +581,7 @@ export default function ExamSessionPage() {
 
     let unsubFs = () => {};
     let unsubBlur = () => {};
+    let unsubFocus = () => {};
 
     if (typeof window !== 'undefined' && window.electronAPI) {
       unsubFs = window.electronAPI.onFullscreenChange((isFullscreen) => {
@@ -517,6 +599,10 @@ export default function ExamSessionPage() {
 
       unsubBlur = window.electronAPI.onWindowBlur((data) => {
         blurHandlerRef.current?.(data);
+      });
+
+      unsubFocus = window.electronAPI.onWindowFocus(() => {
+        focusHandlerRef.current?.();
       });
     }
 
@@ -538,7 +624,12 @@ export default function ExamSessionPage() {
     return () => {
       unsubFs();
       unsubBlur();
+      unsubFocus();
       document.removeEventListener('fullscreenchange', handleHtmlFsChange);
+      if (pendingBlurTimerRef.current) {
+        clearTimeout(pendingBlurTimerRef.current);
+        pendingBlurTimerRef.current = null;
+      }
       if (countdownIntervalRef.current) {
         clearInterval(countdownIntervalRef.current);
         countdownIntervalRef.current = null;
@@ -833,7 +924,10 @@ export default function ExamSessionPage() {
             aria-label={cameraExpanded ? 'Enlarged camera preview' : undefined}
           >
             <video
-              ref={videoRef}
+              ref={(node) => {
+                videoRef.current = node;
+                if (node && !videoMounted) setVideoMounted(true);
+              }}
               autoPlay
               playsInline
               muted
@@ -845,11 +939,57 @@ export default function ExamSessionPage() {
                 style={{
                   background: cameraState === 'active'
                     ? 'var(--color-green)'
+                    : cameraState === 'initializing'
+                    ? 'var(--color-orange)'
                     : 'var(--color-red)',
                 }}
               />
-              <span>{cameraState === 'active' ? 'Camera active' : cameraState}</span>
+              <span>
+                {cameraState === 'active'
+                  ? 'Active'
+                  : cameraState === 'initializing'
+                  ? 'Initializing…'
+                  : cameraState === 'permission_denied'
+                  ? 'Camera Permission Denied'
+                  : cameraState === 'camera_unavailable'
+                  ? 'Camera Unavailable'
+                  : cameraState === 'detection_error'
+                  ? 'Detection Error'
+                  : cameraState === 'stopped'
+                  ? 'Stopped'
+                  : 'Idle'}
+              </span>
             </div>
+            {['permission_denied', 'camera_unavailable', 'detection_error'].includes(cameraState) && (
+              <div
+                className="alert alert-danger"
+                style={{
+                  position: 'absolute',
+                  bottom: '34px',
+                  left: '6px',
+                  right: '6px',
+                  margin: 0,
+                  padding: '5px 8px',
+                  fontSize: '11px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  zIndex: 3,
+                  background: 'rgba(239, 68, 68, 0.95)',
+                  color: '#fff',
+                  borderRadius: '4px',
+                  boxShadow: 'var(--shadow-md)',
+                }}
+                role="alert"
+              >
+                <AlertTriangle size={14} style={{ flexShrink: 0 }} />
+                <span>
+                  {cameraState === 'permission_denied' && 'Camera permission was denied. Please allow access in system settings.'}
+                  {cameraState === 'camera_unavailable' && 'Camera is unavailable or in use by another application.'}
+                  {cameraState === 'detection_error' && 'Failed to load AI proctoring models. Please restart the app.'}
+                </span>
+              </div>
+            )}
             <button
               type="button"
               id="btn-toggle-camera-size"

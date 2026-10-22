@@ -8,6 +8,7 @@ import { useNavigate, Navigate, Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import { Eye, EyeOff, ShieldCheck, Lock, User, ArrowLeft } from 'lucide-react';
+import brandLogo from '../../assets/examproctor.ai_logo.png';
 import styles from './LoginPage.module.css';
 
 const isElectron = typeof window !== 'undefined' && (Boolean(window.electronAPI?.isElectron) || window.location.protocol === 'file:');
@@ -106,7 +107,7 @@ export default function LoginPage() {
             )}
             <Link to="/" className={styles.logoLink} title="Back to Home">
               <img
-                src="/examproctor.ai_logo.png"
+                src={brandLogo}
                 alt="ExamProctor.ai"
                 className={styles.loginLogoImg}
               />

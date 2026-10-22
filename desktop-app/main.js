@@ -42,13 +42,29 @@ function getEntryUrl() {
   return { type: 'file', value: path.join(__dirname, '../frontend/dist/index.html') };
 }
 
+let fullscreenTransitionUntil = 0;
+
+function markFullscreenTransition(durationMs = 2000) {
+  fullscreenTransitionUntil = Math.max(fullscreenTransitionUntil, Date.now() + durationMs);
+}
+
 function createWindow() {
+  const icoCandidate = path.join(__dirname, 'assets', 'icon.ico');
+  const pngCandidate = path.join(__dirname, 'assets', 'icon.png');
+  let iconPath;
+  if (process.platform === 'win32' && fs.existsSync(icoCandidate)) {
+    iconPath = icoCandidate;
+  } else if (fs.existsSync(pngCandidate)) {
+    iconPath = pngCandidate;
+  }
+
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 820,
     minWidth: 1024,
     minHeight: 700,
     title: 'ExamProctor.ai — Student Examination Platform',
+    icon: iconPath,
     autoHideMenuBar: true,
     show: false,
     backgroundColor: '#0a0d14',
@@ -73,12 +89,14 @@ function createWindow() {
 
   // Native fullscreen event forwarding
   mainWindow.on('enter-full-screen', () => {
+    markFullscreenTransition(1500);
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('window:fullscreen-change', true);
     }
   });
 
   mainWindow.on('leave-full-screen', () => {
+    markFullscreenTransition(1500);
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('window:fullscreen-change', false);
     }
@@ -87,8 +105,10 @@ function createWindow() {
   // Focus and blur tracking for examination integrity
   mainWindow.on('blur', () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
+      const isFullscreenTransition = Date.now() < fullscreenTransitionUntil;
       mainWindow.webContents.send('window:blur', {
         timestamp: new Date().toISOString(),
+        isFullscreenTransition,
       });
     }
   });
@@ -149,6 +169,7 @@ ipcMain.handle('window:set-fullscreen', (_event, flag) => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     const target = Boolean(flag);
     if (mainWindow.isFullScreen() !== target) {
+      markFullscreenTransition(2000);
       mainWindow.setFullScreen(target);
     }
     return mainWindow.isFullScreen();

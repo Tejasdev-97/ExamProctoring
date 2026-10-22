@@ -122,7 +122,12 @@ export default function ReadinessPage() {
 
     return () => {
       cancelled = true;
-      // Don't stop the stream here — keep it alive for the exam
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => {
+          try { t.stop(); } catch { /* noop */ }
+        });
+        streamRef.current = null;
+      }
     };
   }, [attemptId, setCheck]);
 

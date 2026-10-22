@@ -10,6 +10,7 @@ import {
   ShieldCheck, Eye, Smartphone, Users, UserX, WifiOff,
   FileText, CheckCircle2, ArrowRight, Lock, Laptop, Check,
 } from 'lucide-react';
+import brandLogo from '../../assets/examproctor.ai_logo.png';
 import styles from './LandingPage.module.css';
 
 export default function LandingPage() {
@@ -19,7 +20,7 @@ export default function LandingPage() {
       <header className={styles.navbar}>
         <Link to="/" className={styles.brand}>
           <img
-            src="/examproctor.ai_logo.png"
+            src={brandLogo}
             alt="ExamProctor.ai"
             className={styles.brandLogoImg}
           />
@@ -325,7 +326,7 @@ export default function LandingPage() {
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-1)' }}>
               <img
-                src="/examproctor.ai_logo.png"
+                src={brandLogo}
                 alt="ExamProctor.ai"
                 className={styles.brandLogoImg}
                 style={{ width: 28, height: 28 }}

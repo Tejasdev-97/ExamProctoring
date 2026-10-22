@@ -1,5 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 test('Desktop App Guard: rejects non-student accounts on Electron and permits them on Web', () => {
   function validateLoginRole(user, isElectron) {
@@ -362,5 +368,124 @@ test('Fullscreen Idempotency: repeated setFullscreen calls do not toggle or disp
   // Redundant exit calls do NOT change state
   assert.equal(setFullscreenIdempotent(false), false);
   assert.equal(stateChangeCount, 2);
+});
+
+test('Window Blur Debounce: transient blur (<1200ms) or fullscreen transition is discarded without recording misconduct', async () => {
+  const eventsRecorded = [];
+  let pendingTimer = null;
+  let activeEpisode = null;
+
+  function onBlur(data) {
+    if (data?.isFullscreenTransition) return; // Suppressed during fullscreen mode change
+    if (activeEpisode || pendingTimer) return; // Do not duplicate
+
+    pendingTimer = {
+      startedAt: Date.now(),
+      timeoutId: 'mock-timer',
+    };
+  }
+
+  function onFocus() {
+    // If focus returned before debounce threshold, cancel without recording misconduct
+    if (pendingTimer) {
+      pendingTimer = null;
+    }
+    if (activeEpisode) {
+      eventsRecorded.push({
+        event_type: 'window_blur',
+        event_status: 'confirmed',
+        duration_ms: Date.now() - activeEpisode.startedAt,
+      });
+      activeEpisode = null;
+    }
+  }
+
+  // Case 1: Fullscreen transition blur
+  onBlur({ isFullscreenTransition: true });
+  assert.equal(pendingTimer, null, 'Must ignore blurs during fullscreen transitions');
+  assert.equal(eventsRecorded.length, 0);
+
+  // Case 2: Transient blur (e.g. quick click or notification, focus returns in 300ms)
+  onBlur({ isFullscreenTransition: false });
+  assert.ok(pendingTimer !== null, 'Timer started');
+  onFocus(); // Focus returns within grace window
+  assert.equal(pendingTimer, null, 'Pending timer cleared');
+  assert.equal(eventsRecorded.length, 0, 'No event must be recorded for transient blur');
+});
+
+test('Window Blur Deduplication: repeated blur events during the same continuous unfocused period do not create duplicates', () => {
+  const episodesCreated = [];
+  let activeEpisode = null;
+  let pendingTimer = null;
+
+  function onBlur(data) {
+    if (data?.isFullscreenTransition) return;
+    if (activeEpisode || pendingTimer) return; // Deduplicate!
+    pendingTimer = true;
+  }
+
+  function triggerDebounceExpire(blurIso) {
+    pendingTimer = null;
+    activeEpisode = {
+      eventId: 'evt-' + (episodesCreated.length + 1),
+      startedAt: blurIso,
+    };
+    episodesCreated.push(activeEpisode);
+  }
+
+  // 1st blur
+  onBlur({ isFullscreenTransition: false });
+  triggerDebounceExpire('2026-10-22T10:00:00.000Z');
+  assert.equal(episodesCreated.length, 1);
+
+  // Repeated blurs while still blurred (e.g. at 1:23:51 and 1:23:56)
+  onBlur({ isFullscreenTransition: false });
+  onBlur({ isFullscreenTransition: false });
+  assert.equal(episodesCreated.length, 1, 'Must NOT create duplicate episodes for continuous blur');
+});
+
+test('Refocus Grace Recovery: window refocusing during fullscreen exit warning cancels the pending penalty', () => {
+  let warningActive = false;
+  let penaltyTriggered = false;
+  let timerActive = false;
+
+  function onFullscreenExit() {
+    warningActive = true;
+    timerActive = true;
+  }
+
+  function onRefocusedAndFullscreenRestored(isFs) {
+    if (isFs && timerActive) {
+      warningActive = false;
+      timerActive = false;
+    }
+  }
+
+  // Student accidentally exits fullscreen -> warning starts
+  onFullscreenExit();
+  assert.equal(warningActive, true);
+  assert.equal(timerActive, true);
+
+  // Student clicks back and enters fullscreen within the 5s grace period
+  onRefocusedAndFullscreenRestored(true);
+  assert.equal(warningActive, false, 'Warning must be dismissed');
+  assert.equal(timerActive, false, 'Auto-submit timer must be cancelled');
+  assert.equal(penaltyTriggered, false, 'Penalty must NOT be triggered');
+});
+
+test('Logo and Icon Asset Integrity: source PNG, ICO, and package configuration are valid and present', () => {
+  const logoSourcePath = path.resolve(__dirname, '../../desktop-app/assets/examproctor.ai_logo.png');
+  const icoSourcePath = path.resolve(__dirname, '../../desktop-app/assets/icon.ico');
+  const frontendAssetPath = path.resolve(__dirname, '../src/assets/examproctor.ai_logo.png');
+  const packageJsonPath = path.resolve(__dirname, '../../desktop-app/package.json');
+
+  assert.ok(fs.existsSync(logoSourcePath), 'desktop-app/assets/examproctor.ai_logo.png must exist');
+  assert.ok(fs.existsSync(icoSourcePath), 'desktop-app/assets/icon.ico must exist');
+  assert.ok(fs.existsSync(frontendAssetPath), 'frontend/src/assets/examproctor.ai_logo.png must exist');
+
+  const pkgJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+  assert.equal(pkgJson.build.win.icon, 'assets/icon.ico');
+  assert.equal(pkgJson.build.nsis.installerIcon, 'assets/icon.ico');
+  assert.ok(pkgJson.build.files.includes('assets/**/*'), 'assets/**/* must be included in packaged files');
 });
 

@@ -10,6 +10,7 @@ import {
   LayoutDashboard, BookOpen, Users, Settings, LogOut,
   ShieldCheck, Video, Menu, X, ChevronLeft, ChevronRight,
 } from 'lucide-react';
+import brandLogo from '../../assets/examproctor.ai_logo.png';
 import styles from './AppLayout.module.css';
 
 function NavItem({ to, icon: Icon, label, collapsed, onClick }) {
@@ -82,7 +83,7 @@ export default function AppLayout() {
       <header className={styles.mobileTopbar}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
           <img
-            src="/examproctor.ai_logo.png"
+            src={brandLogo}
             alt="ExamProctor.ai"
             className={styles.brandLogoImg}
             style={{ width: 32, height: 32 }}
@@ -119,7 +120,7 @@ export default function AppLayout() {
         <div className={styles.brand}>
           <div className={styles.brandLeft}>
             <img
-              src="/examproctor.ai_logo.png"
+              src={brandLogo}
               alt="ExamProctor.ai"
               className={styles.brandLogoImg}
             />
