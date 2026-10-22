@@ -3,11 +3,13 @@ ExamProctor.ai — Question management + Excel import endpoints.
 """
 
 import io
+from pathlib import Path
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, List
 
 from fastapi import APIRouter, Depends, File, UploadFile, HTTPException
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -317,29 +319,46 @@ async def import_confirm(
     return {"data": {"imported_count": created, "skipped_invalid": len(preview["questions"]) - created}}
 
 
+def _resolve_template_path() -> Path:
+    """Safely locate questions_template.xlsx across project structures and deployment environments."""
+    filename = "questions_template.xlsx"
+    current_file = Path(__file__).resolve()
+
+    # Search upwards from current file to project root
+    for parent in [current_file.parent, *current_file.parents]:
+        candidate = parent / "templates" / filename
+        if candidate.is_file():
+            return candidate
+        candidate = parent / "backend" / "templates" / filename
+        if candidate.is_file():
+            return candidate
+
+    # Search relative to current working directory
+    cwd = Path.cwd().resolve()
+    for candidate in [
+        cwd / "templates" / filename,
+        cwd / "backend" / "templates" / filename,
+    ]:
+        if candidate.is_file():
+            return candidate
+
+    # Fallback to standard project structure path
+    return current_file.parents[3] / "templates" / filename
+
+
 @router.get("/exams/{exam_id}/questions/template")
 async def download_template(
     exam_id: str,
     actor: ProfessorUser,
 ):
     """Return Excel template for question import."""
-    import openpyxl
-    from fastapi.responses import StreamingResponse
+    template_path = _resolve_template_path()
+    if not template_path.is_file():
+        raise AppError(404, "TEMPLATE_NOT_FOUND", "Question template file is missing on the server.")
 
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Questions"
-    headers = ["question_type", "question_text", "marks", "option_a", "option_b", "option_c", "option_d", "correct_option"]
-    ws.append(headers)
-    ws.append(["mcq", "Which protocol resolves domain names?", 1, "HTTP", "DNS", "FTP", "SMTP", "B"])
-    ws.append(["short_answer", "Explain the OSI model.", 5, "", "", "", "", ""])
-
-    buf = io.BytesIO()
-    wb.save(buf)
-    buf.seek(0)
-
-    return StreamingResponse(
-        buf,
+    return FileResponse(
+        path=template_path,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename="questions_template.xlsx",
         headers={"Content-Disposition": "attachment; filename=questions_template.xlsx"},
     )
