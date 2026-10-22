@@ -49,7 +49,7 @@ export default function LoginPage() {
       } else if (err?.response?.status === 403) {
         setError('Your account is inactive. Contact your administrator.');
       } else {
-        setError(msg || 'Login failed. Please try again.');
+        setError(msg || err?.message || 'Login failed. Please try again.');
       }
     } finally {
       setSubmitting(false);

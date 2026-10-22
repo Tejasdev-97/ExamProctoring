@@ -138,3 +138,124 @@ async def test_list_my_attempts_student_isolation():
     assert res["data"][0]["exam_title"] == "Computer Networks"
     assert res["data"][0]["duration_seconds"] == 3600
 
+
+@pytest.mark.asyncio
+async def test_authorize_attempt_multiple_attempts_selects_highest_and_consumes_grant():
+    from app.api.v1.attempts import authorize_attempt
+    from app.schemas.schemas import AuthorizeAttemptRequest
+    from app.db.models import Exam, ExamAttempt, RetakeGrant
+
+    exam = Exam(
+        exam_id="ex-1",
+        owner_user_id="prof-1",
+        title="Internet of Things",
+        exam_code="480223",
+        duration_seconds=1800,
+        status="active",
+        question_package_version=1,
+    )
+
+    # Student has previously submitted attempt 3
+    submitted_att3 = ExamAttempt(
+        attempt_id="att-3",
+        exam_id="ex-1",
+        student_user_id="student-A",
+        attempt_number=3,
+        status="submitted",
+        package_version=1,
+        authorization_id="auth-prev",
+        authorized_at=datetime.now(timezone.utc),
+        last_accepted_sequence=10,
+        submission_received=True,
+    )
+
+    grant = RetakeGrant(
+        retake_grant_id="grant-1",
+        exam_id="ex-1",
+        student_user_id="student-A",
+        granted_by_user_id="prof-1",
+        status="granted",
+    )
+
+    actor = {"sub": "student-A", "role": "student"}
+    body = AuthorizeAttemptRequest(exam_code="480223")
+
+    # Mock execute results:
+    # 1. exam lookup -> exam
+    # 2. existing in-progress -> None
+    # 3. submitted lookup -> submitted_att3
+    # 4. retake grant lookup -> grant
+    res1, res2, res3, res4 = MagicMock(), MagicMock(), MagicMock(), MagicMock()
+    res1.scalars.return_value.first.return_value = exam
+    res2.scalars.return_value.first.return_value = None
+    res3.scalars.return_value.first.return_value = submitted_att3
+    res4.scalars.return_value.first.return_value = grant
+
+    mock_db = AsyncMock()
+    mock_db.execute.side_effect = [res1, res2, res3, res4]
+
+    result = await authorize_attempt(body=body, actor=actor, db=mock_db)
+
+    # Verify attempt_number incremented from 3 to 4 (not duplicate 3)
+    assert result["data"].attempt_number == 4
+    assert result["data"].status == "authorized"
+    assert result["data"].student_user_id == "student-A"
+    assert result["data"].exam_id == "ex-1"
+
+    # Verify grant was consumed and assigned the new attempt_id
+    assert grant.status == "consumed"
+    assert grant.consumed_at is not None
+    assert grant.consumed_by_attempt_id == result["data"].attempt_id
+
+    # Verify the submitted attempt query used order_by descending
+    submitted_query = mock_db.execute.call_args_list[2][0][0]
+    assert len(submitted_query._order_by_clauses) > 0
+
+
+@pytest.mark.asyncio
+async def test_authorize_attempt_submitted_without_grant_raises_conflict():
+    from app.api.v1.attempts import authorize_attempt
+    from app.schemas.schemas import AuthorizeAttemptRequest
+    from app.core.errors import ConflictError
+    from app.db.models import Exam, ExamAttempt
+
+    exam = Exam(
+        exam_id="ex-1",
+        owner_user_id="prof-1",
+        title="Internet of Things",
+        exam_code="480223",
+        duration_seconds=1800,
+        status="active",
+        question_package_version=1,
+    )
+    submitted_att1 = ExamAttempt(
+        attempt_id="att-1",
+        exam_id="ex-1",
+        student_user_id="student-A",
+        attempt_number=1,
+        status="submitted",
+        package_version=1,
+        authorization_id="auth-prev",
+        authorized_at=datetime.now(timezone.utc),
+        last_accepted_sequence=5,
+        submission_received=True,
+    )
+
+    actor = {"sub": "student-A", "role": "student"}
+    body = AuthorizeAttemptRequest(exam_code="480223")
+
+    res1, res2, res3, res4 = MagicMock(), MagicMock(), MagicMock(), MagicMock()
+    res1.scalars.return_value.first.return_value = exam
+    res2.scalars.return_value.first.return_value = None
+    res3.scalars.return_value.first.return_value = submitted_att1
+    res4.scalars.return_value.first.return_value = None  # No active grant
+
+    mock_db = AsyncMock()
+    mock_db.execute.side_effect = [res1, res2, res3, res4]
+
+    with pytest.raises(ConflictError) as exc_info:
+        await authorize_attempt(body=body, actor=actor, db=mock_db)
+
+    assert "retake requires professor authorization" in str(exc_info.value.message)
+
+

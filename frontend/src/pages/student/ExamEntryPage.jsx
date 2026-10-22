@@ -40,7 +40,9 @@ export default function ExamEntryPage() {
       const { data } = await api.post('/exams/resolve-code', { exam_code: code });
       setResolved(data.data);
     } catch (err) {
-      const msg = err?.response?.data?.error?.message;
+      const msg = err?.response?.data?.error?.message
+        || err?.response?.data?.detail
+        || err?.message;
       setError(
         err?.response?.status === 404
           ? 'No active exam found with that code. Double-check with your professor.'
@@ -68,7 +70,9 @@ export default function ExamEntryPage() {
       toast('Exam authorized! Proceeding to readiness check.', 'success');
       navigate(`/student/readiness/${attempt.attempt_id}`);
     } catch (err) {
-      const msg = err?.response?.data?.error?.message;
+      const msg = err?.response?.data?.error?.message
+        || err?.response?.data?.detail
+        || err?.message;
       setError(msg || 'Could not authorize this exam. Please try again.');
     } finally {
       setAuthorizing(false);

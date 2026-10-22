@@ -4,10 +4,15 @@
  */
 
 import { lazy, Suspense } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ToastProvider } from './contexts/ToastContext';
 import './index.css';
+
+// In Electron / file:// protocol, HTML5 pushState cannot match filesystem paths.
+// We use HashRouter for Electron desktop and preserve BrowserRouter for the web.
+const isElectron = typeof window !== 'undefined' && (Boolean(window.electronAPI?.isElectron) || window.location.protocol === 'file:');
+const Router = isElectron ? HashRouter : BrowserRouter;
 
 // ── Layouts ───────────────────────────────────────────────────────────────
 import AppLayout from './components/layout/AppLayout';
@@ -71,14 +76,14 @@ function RoleRedirect() {
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <Router>
       <AuthProvider>
         <ToastProvider>
           <Suspense fallback={<PageLoader />}>
             <Routes>
-              {/* Public */}
+              {/* Public: Desktop app lands on /login, web lands on LandingPage */}
               <Route path="/login" element={<LoginPage />} />
-              <Route path="/" element={<LandingPage />} />
+              <Route path="/" element={isElectron ? <Navigate to="/login" replace /> : <LandingPage />} />
 
               {/* Student routes */}
               <Route element={<RequireAuth allowedRoles={['student']}><AppLayout /></RequireAuth>}>
@@ -116,6 +121,6 @@ export default function App() {
           </Suspense>
         </ToastProvider>
       </AuthProvider>
-    </BrowserRouter>
+    </Router>
   );
 }

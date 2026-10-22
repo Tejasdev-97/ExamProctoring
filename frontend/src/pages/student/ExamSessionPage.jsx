@@ -154,6 +154,13 @@ export default function ExamSessionPage() {
   const [deadlineMs, setDeadlineMs] = useState(null);
   const submittingRef = useRef(false);
 
+  // Fullscreen integrity and offline warning state
+  const [fullscreenWarningActive, setFullscreenWarningActive] = useState(false);
+  const [fullscreenSecondsRemaining, setFullscreenSecondsRemaining] = useState(5);
+  const [isOnline, setIsOnline] = useState(() => (typeof navigator !== 'undefined' ? navigator.onLine : true));
+  const [offlineWarningDismissed, setOfflineWarningDismissed] = useState(false);
+  const countdownIntervalRef = useRef(null);
+
   // CV proctoring
   const { cameraState, activeWarnings, eventCount, dismissWarning, flushEvents, storageWarning, stopCamera } = useProctoring({
     videoRef,
@@ -272,6 +279,14 @@ export default function ExamSessionPage() {
 
       // Stop camera tracks and frame loop immediately upon submission
       stopCamera();
+      if (typeof window !== 'undefined' && window.electronAPI?.setFullscreen) {
+        window.electronAPI.setFullscreen(false);
+      }
+      if (countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current);
+        countdownIntervalRef.current = null;
+      }
+      setFullscreenWarningActive(false);
 
       // Idempotent across crashes between enqueue and local commit: reuse an existing
       // finalize operation instead of creating a second submission.
@@ -304,6 +319,169 @@ export default function ExamSessionPage() {
       setSubmitLoading(false);
     }
   }, [attemptId, flushEvents, stopCamera]);
+
+  // Handle return to fullscreen action
+  const handleReturnToFullscreen = useCallback(async () => {
+    if (typeof window !== 'undefined' && window.electronAPI?.setFullscreen) {
+      await window.electronAPI.setFullscreen(true);
+    } else if (document.documentElement?.requestFullscreen) {
+      try {
+        await document.documentElement.requestFullscreen();
+      } catch { /* ignore */ }
+    }
+  }, []);
+
+  // Fullscreen exit & grace period handler
+  const handleFullscreenExitDetected = useCallback(async () => {
+    if (submittingRef.current || submitted) return;
+
+    setFullscreenWarningActive(true);
+    setFullscreenSecondsRemaining(5);
+
+    // Record proctoring event to local outbox
+    const eventId = uuidv4();
+    const nowIso = new Date().toISOString();
+    try {
+      await enqueueOperation({
+        operationId: uuidv4(),
+        attemptId,
+        operationType: 'event_upsert',
+        entityId: eventId,
+        payload: {
+          event_id: eventId,
+          event_type: 'fullscreen_exit',
+          event_status: 'confirmed',
+          client_started_at: nowIso,
+          client_ended_at: nowIso,
+          duration_ms: 0,
+          metadata: { reason: 'fullscreen_exit_detected', attempt_id: attemptId },
+        },
+      });
+    } catch (e) {
+      console.warn('Failed to record fullscreen_exit event', e);
+    }
+
+    if (countdownIntervalRef.current) {
+      clearInterval(countdownIntervalRef.current);
+    }
+
+    let remaining = 5;
+    countdownIntervalRef.current = setInterval(() => {
+      remaining -= 1;
+      setFullscreenSecondsRemaining(remaining);
+      if (remaining <= 0) {
+        clearInterval(countdownIntervalRef.current);
+        countdownIntervalRef.current = null;
+        setFullscreenWarningActive(false);
+        // Timeout: automatically submit the examination
+        handleSubmit();
+      }
+    }, 1000);
+  }, [attemptId, submitted, handleSubmit]);
+
+  // Window blur handler (distinct from fullscreen exit)
+  const handleWindowBlurDetected = useCallback(async (data) => {
+    if (submittingRef.current || submitted) return;
+    const eventId = uuidv4();
+    const blurIso = data?.timestamp || new Date().toISOString();
+    try {
+      await enqueueOperation({
+        operationId: uuidv4(),
+        attemptId,
+        operationType: 'event_upsert',
+        entityId: eventId,
+        payload: {
+          event_id: eventId,
+          event_type: 'window_blur',
+          event_status: 'confirmed',
+          client_started_at: blurIso,
+          client_ended_at: blurIso,
+          duration_ms: 0,
+          metadata: { reason: 'window_focus_loss_detected', attempt_id: attemptId },
+        },
+      });
+    } catch (e) {
+      console.warn('Failed to record window_blur event', e);
+    }
+  }, [attemptId, submitted]);
+
+  // Online / offline event tracking
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      setOfflineWarningDismissed(false);
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+      setOfflineWarningDismissed(false);
+    };
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // Electron fullscreen and window integrity lifecycle
+  useEffect(() => {
+    if (submitted) return undefined;
+
+    // Enter fullscreen when active
+    if (typeof window !== 'undefined' && window.electronAPI?.setFullscreen) {
+      window.electronAPI.setFullscreen(true);
+    }
+
+    let unsubFs = () => {};
+    let unsubBlur = () => {};
+
+    if (typeof window !== 'undefined' && window.electronAPI) {
+      unsubFs = window.electronAPI.onFullscreenChange((isFullscreen) => {
+        if (isFullscreen) {
+          // Returned to fullscreen: dismiss warning and cancel auto-submit timer
+          setFullscreenWarningActive(false);
+          if (countdownIntervalRef.current) {
+            clearInterval(countdownIntervalRef.current);
+            countdownIntervalRef.current = null;
+          }
+        } else {
+          handleFullscreenExitDetected();
+        }
+      });
+
+      unsubBlur = window.electronAPI.onWindowBlur((data) => {
+        handleWindowBlurDetected(data);
+      });
+    }
+
+    // HTML5 fullscreen change fallback for web browsers
+    const handleHtmlFsChange = () => {
+      const isFs = Boolean(document.fullscreenElement);
+      if (isFs) {
+        setFullscreenWarningActive(false);
+        if (countdownIntervalRef.current) {
+          clearInterval(countdownIntervalRef.current);
+          countdownIntervalRef.current = null;
+        }
+      } else {
+        handleFullscreenExitDetected();
+      }
+    };
+    document.addEventListener('fullscreenchange', handleHtmlFsChange);
+
+    return () => {
+      unsubFs();
+      unsubBlur();
+      document.removeEventListener('fullscreenchange', handleHtmlFsChange);
+      if (countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current);
+      }
+      if (typeof window !== 'undefined' && window.electronAPI?.setFullscreen) {
+        window.electronAPI.setFullscreen(false);
+      }
+    };
+  }, [submitted, handleFullscreenExitDetected, handleWindowBlurDetected]);
+
 
   // ── Submission confirmation screen ────────────────────────────────────
   if (submitted) {
@@ -355,6 +533,94 @@ export default function ExamSessionPage() {
 
   return (
     <div className={styles.shell}>
+      {/* Offline Mode Warning Banner */}
+      {!isOnline && !offlineWarningDismissed && (
+        <div
+          className="alert alert-warning"
+          style={{
+            position: 'fixed',
+            top: 'var(--space-3)',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 999,
+            maxWidth: '90%',
+            boxShadow: 'var(--shadow-lg)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--space-3)',
+          }}
+          role="status"
+        >
+          <AlertTriangle size={18} style={{ flexShrink: 0 }} />
+          <span style={{ fontSize: 'var(--font-size-sm)', flex: 1 }}>
+            No internet connection. Offline mode is active. Your examination, monitoring, and answers will continue to be saved on this computer. Synchronization will resume when the connection returns.
+          </span>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => setOfflineWarningDismissed(true)}
+            aria-label="Dismiss offline warning"
+            style={{ padding: '2px 6px', minWidth: 0, flexShrink: 0 }}
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
+      {/* Fullscreen Exit Warning & Grace Period Modal */}
+      {fullscreenWarningActive && (
+        <div
+          className="modal-backdrop"
+          role="alertdialog"
+          aria-modal="true"
+          style={{ zIndex: 1100, background: 'rgba(0, 0, 0, 0.85)' }}
+        >
+          <div className="modal-dialog" style={{ maxWidth: 480, border: '2px solid var(--color-red)' }}>
+            <div className="modal-header" style={{ borderBottom: '1px solid var(--color-red-border)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', color: 'var(--color-red)' }}>
+                <AlertTriangle size={22} />
+                <h3 className="modal-title" style={{ color: 'var(--color-red)' }}>Fullscreen Exit Warning</h3>
+              </div>
+            </div>
+            <div className="modal-body">
+              <p style={{ fontSize: 'var(--font-size-base)', lineHeight: 1.5, fontWeight: 600 }}>
+                You have exited fullscreen mode. Return to fullscreen within{' '}
+                <span style={{ color: 'var(--color-red)', fontSize: 'var(--font-size-xl)' }}>
+                  {fullscreenSecondsRemaining}s
+                </span>{' '}
+                or your exam will be automatically submitted.
+              </p>
+              <div
+                style={{
+                  height: 6,
+                  background: 'var(--color-surface-hover)',
+                  borderRadius: 3,
+                  marginTop: 'var(--space-4)',
+                  overflow: 'hidden',
+                }}
+              >
+                <div
+                  style={{
+                    height: '100%',
+                    width: `${(fullscreenSecondsRemaining / 5) * 100}%`,
+                    background: 'var(--color-red)',
+                    transition: 'width 1s linear',
+                  }}
+                />
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button
+                className="btn btn-primary w-full"
+                onClick={handleReturnToFullscreen}
+                id="btn-return-fullscreen"
+              >
+                Return to Fullscreen ({fullscreenSecondsRemaining}s)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Left panel: nav + timer ── */}
       <aside className={styles.leftPanel}>
         <div className={styles.examMeta}>

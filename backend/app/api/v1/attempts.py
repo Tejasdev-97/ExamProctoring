@@ -62,7 +62,7 @@ async def authorize_attempt(
         ExamAttempt.exam_id == exam.exam_id,
         ExamAttempt.student_user_id == actor["sub"],
         ExamAttempt.status.in_(["authorized", "in_progress"]),
-    )
+    ).order_by(ExamAttempt.attempt_number.desc())
     existing: ExamAttempt | None = (await db.execute(stmt)).scalars().first()
     if existing:
         return {"data": AttemptOut.model_validate(existing)}
@@ -72,23 +72,21 @@ async def authorize_attempt(
         ExamAttempt.exam_id == exam.exam_id,
         ExamAttempt.student_user_id == actor["sub"],
         ExamAttempt.status.in_(["submitted", "submitted_local"]),
-    )
+    ).order_by(ExamAttempt.attempt_number.desc())
     submitted: ExamAttempt | None = (await db.execute(stmt)).scalars().first()
+    active_grant: RetakeGrant | None = None
     if submitted:
         # Check for a valid retake grant
         stmt = select(RetakeGrant).where(
             RetakeGrant.exam_id == exam.exam_id,
             RetakeGrant.student_user_id == actor["sub"],
             RetakeGrant.status == "granted",
-        )
-        grant: RetakeGrant | None = (await db.execute(stmt)).scalars().first()
-        if not grant:
+        ).order_by(RetakeGrant.granted_at.desc())
+        active_grant = (await db.execute(stmt)).scalars().first()
+        if not active_grant:
             raise ConflictError("You have already submitted this examination. A retake requires professor authorization.")
         attempt_num = submitted.attempt_number + 1
         prev_attempt_id = submitted.attempt_id
-        # Mark grant consumed
-        grant.status = "consumed"
-        grant.consumed_at = datetime.now(timezone.utc)
     else:
         attempt_num = 1
         prev_attempt_id = None
@@ -109,6 +107,11 @@ async def authorize_attempt(
     )
     db.add(attempt)
 
+    if active_grant:
+        active_grant.status = "consumed"
+        active_grant.consumed_at = datetime.now(timezone.utc)
+        active_grant.consumed_by_attempt_id = attempt.attempt_id
+
     log = AuditLog(
         actor_user_id=actor["sub"],
         action_type="attempt_authorized",
@@ -119,9 +122,6 @@ async def authorize_attempt(
     )
     db.add(log)
     await db.flush()
-
-    if grant if submitted else False:
-        grant.consumed_by_attempt_id = attempt.attempt_id
 
     return {"data": AttemptOut.model_validate(attempt)}
 

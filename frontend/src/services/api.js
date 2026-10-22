@@ -31,9 +31,12 @@ export function normalizeApiBaseUrl(rawUrl) {
   return `${trimmed}/api/v1`;
 }
 
-const rawEnvUrl = typeof import.meta !== 'undefined' && import.meta?.env
-  ? import.meta.env.VITE_API_BASE_URL
-  : (typeof process !== 'undefined' && process.env?.VITE_API_BASE_URL ? process.env.VITE_API_BASE_URL : undefined);
+const isElectron = typeof window !== 'undefined' && (Boolean(window.electronAPI?.isElectron) || window.location.protocol === 'file:');
+const isProd = typeof import.meta !== 'undefined' && Boolean(import.meta.env?.PROD || import.meta.env?.MODE === 'production');
+
+const rawEnvUrl = (typeof import.meta !== 'undefined' && import.meta?.env?.VITE_API_BASE_URL)
+  || (typeof process !== 'undefined' && process.env?.VITE_API_BASE_URL)
+  || ((isProd || isElectron) ? 'https://examproctor-backend-2yfp.onrender.com/api/v1' : undefined);
 
 export const BASE_URL = normalizeApiBaseUrl(rawEnvUrl);
 
@@ -68,11 +71,26 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    // Diagnostic error logging for API/network visibility in Electron and web
+    if (typeof console !== 'undefined') {
+      const fullUrl = error.config?.baseURL
+        ? `${error.config.baseURL.replace(/\/+$/, '')}/${(error.config.url || '').replace(/^\/+/, '')}`
+        : (error.config?.url || 'unknown');
+      console.warn(`[API Error] ${error.config?.method?.toUpperCase() || 'REQ'} ${fullUrl} -> ${error.message} (status: ${error.response?.status || 'none'})`);
+    }
+
     if (error.response?.status === 401) {
       localStorage.removeItem('ep_access_token');
       // Only redirect to /login if on a protected route (not on public landing or login page)
-      if (!window.location.pathname.startsWith('/login') && window.location.pathname !== '/') {
-        window.location.href = '/login';
+      const isElectron = typeof window !== 'undefined' && (Boolean(window.electronAPI?.isElectron) || window.location.protocol === 'file:');
+      if (isElectron) {
+        if (!window.location.hash.startsWith('#/login')) {
+          window.location.hash = '#/login';
+        }
+      } else {
+        if (!window.location.pathname.startsWith('/login') && window.location.pathname !== '/') {
+          window.location.href = '/login';
+        }
       }
     }
     return Promise.reject(error);

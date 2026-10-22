@@ -23,10 +23,49 @@ export function AuthProvider({ children }) {
       }
       try {
         const { data } = await api.get('/auth/me');
-        setUser(data.data);
-        await db.session.put(data.data);
-      } catch {
-        localStorage.removeItem('ep_access_token');
+        const userData = data.data;
+
+        // Desktop app guard: only student accounts are permitted
+        if (typeof window !== 'undefined' && window.electronAPI?.isElectron && userData.role !== 'student') {
+          localStorage.removeItem('ep_access_token');
+          await db.session.clear();
+          setUser(null);
+          setLoading(false);
+          return;
+        }
+
+        setUser(userData);
+        await db.session.put(userData);
+      } catch (err) {
+        const isAuthError = err?.response?.status === 401 || err?.response?.status === 403;
+        if (isAuthError) {
+          // Token is genuinely invalid or expired on server
+          localStorage.removeItem('ep_access_token');
+          await db.session.clear();
+          setUser(null);
+        } else {
+          // Network error or offline: recover from cached local session if present
+          try {
+            const cachedUsers = await db.session.toArray();
+            if (cachedUsers && cachedUsers.length > 0) {
+              const cached = cachedUsers[0];
+              // On desktop, cached user must be a student
+              if (typeof window !== 'undefined' && window.electronAPI?.isElectron && cached.role !== 'student') {
+                localStorage.removeItem('ep_access_token');
+                await db.session.clear();
+                setUser(null);
+              } else {
+                setUser(cached);
+              }
+            } else {
+              localStorage.removeItem('ep_access_token');
+              setUser(null);
+            }
+          } catch {
+            localStorage.removeItem('ep_access_token');
+            setUser(null);
+          }
+        }
       } finally {
         setLoading(false);
       }
@@ -36,6 +75,14 @@ export function AuthProvider({ children }) {
   const login = useCallback(async (identifier, password) => {
     const { data } = await api.post('/auth/login', { identifier, password });
     const { user: u, access_token } = data.data;
+
+    // Desktop app guard: reject non-student accounts immediately
+    if (typeof window !== 'undefined' && window.electronAPI?.isElectron && u.role !== 'student') {
+      throw new Error(
+        'Access restricted: The desktop application is reserved exclusively for Student examinations. Administrators and Professors must sign in via the web portal.'
+      );
+    }
+
     localStorage.setItem('ep_access_token', access_token);
     setUser(u);
     await db.session.put(u);
