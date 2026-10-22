@@ -188,6 +188,23 @@ export function useProctoring({ videoRef, attemptId, proctoringConfig, enabled =
 
     // ── confirmed episode start ──
     if (phase === 'start') {
+      const WARNING_MESSAGES = {
+        face_absent:         'No face detected. Please ensure your face is visible to the camera.',
+        multiple_faces:      'Multiple people detected. Only one person may be present during the examination.',
+        sustained_head_turn: 'Please face the screen. Sustained head turns are being monitored.',
+        phone_detected:      'A mobile device has been detected. Please remove it from view.',
+        camera_unavailable:  'Camera connection lost. Please reconnect your webcam.',
+      };
+      const msg = WARNING_MESSAGES[type];
+      if (msg) {
+        setActiveWarnings((prev) => [
+          ...prev.filter((w) => w.type !== type),
+          { id: event.event_id, type, message: msg },
+        ]);
+      }
+      // Counter = confirmed continuous episodes (not raw frames).
+      setEventCount((prev) => ({ ...prev, [type]: (prev[type] || 0) + 1 }));
+
       const open = { ...event, event_status: 'confirmed' };
       await eventRepo.save({
         event_id: open.event_id, attempt_id: attemptId, event_type: type,
@@ -212,23 +229,6 @@ export function useProctoring({ videoRef, attemptId, proctoringConfig, enabled =
           await snapshotRepo.updateStatus(snapId, 'local'); // promote: now deliverable evidence
         }
       }
-
-      const WARNING_MESSAGES = {
-        face_absent:         'No face detected. Please ensure your face is visible to the camera.',
-        multiple_faces:      'Multiple people detected. Only one person may be present during the examination.',
-        sustained_head_turn: 'Please face the screen. Sustained head turns are being monitored.',
-        phone_detected:      'A mobile device has been detected. Please remove it from view.',
-        camera_unavailable:  'Camera connection lost. Please reconnect your webcam.',
-      };
-      const msg = WARNING_MESSAGES[type];
-      if (msg) {
-        setActiveWarnings((prev) => [
-          ...prev.filter((w) => w.type !== type),
-          { id: event.event_id, type, message: msg },
-        ]);
-      }
-      // Counter = confirmed continuous episodes (not raw frames).
-      setEventCount((prev) => ({ ...prev, [type]: (prev[type] || 0) + 1 }));
 
       await enqueueOperation({
         operationId: uuidv4(), attemptId, operationType: 'event_upsert', entityId: event.event_id,

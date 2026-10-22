@@ -88,7 +88,7 @@ def prepare_image(image_bytes: bytes):
     return io.BytesIO(image_bytes), w * scale, h * scale
 
 
-def load_snapshot_bytes(snap: Snapshot):
+def load_snapshot_bytes(snap: Snapshot, blob_bytes: bytes | None = None):
     """
     Read a stored snapshot safely. Returns (bytes|None, status, message):
       ('image',        ...) bytes verified against the registered checksum
@@ -98,6 +98,20 @@ def load_snapshot_bytes(snap: Snapshot):
     """
     if snap.storage_status != "uploaded":
         return None, "pending", f"Evidence upload not completed (status: {snap.storage_status})."
+
+    # 1. Check PostgreSQL blob bytes if supplied or attached to model
+    data = blob_bytes
+    if data is None and hasattr(snap, "blob") and snap.blob is not None:
+        data = getattr(snap.blob, "image_data", None)
+
+    if data is not None:
+        if len(data) > settings.MAX_SNAPSHOT_SIZE_BYTES:
+            return None, "corrupt", "Evidence file exceeds the permitted size."
+        if snap.sha256 and hashlib.sha256(data).hexdigest().lower() != snap.sha256.lower():
+            return None, "corrupt", "Evidence file failed its integrity check (checksum mismatch)."
+        return data, "image", ""
+
+    # 2. Legacy filesystem fallback
     from app.api.v1.snapshots import resolve_snapshot_path
     path = resolve_snapshot_path(snap)
     if path is None:
@@ -108,7 +122,7 @@ def load_snapshot_bytes(snap: Snapshot):
         data = path.read_bytes()
     except OSError:
         return None, "file_missing", "Evidence file could not be read."
-    if hashlib.sha256(data).hexdigest() != snap.sha256:
+    if snap.sha256 and hashlib.sha256(data).hexdigest().lower() != snap.sha256.lower():
         return None, "corrupt", "Evidence file failed its integrity check (checksum mismatch)."
     return data, "image", ""
 
@@ -272,7 +286,7 @@ async def _authorize(db: AsyncSession, attempt_id: str, actor: dict):
     return attempt, exam
 
 
-def build_attempt_pdf_data(attempt, exam, student, events, snapshots, with_images=True) -> dict:
+def build_attempt_pdf_data(attempt, exam, student, events, snapshots, with_images=True, blob_map: dict[str, bytes] | None = None) -> dict:
     """Assemble the shared-renderer structure from persisted records (pure given its inputs)."""
     by_event: dict[str, list] = {}
     for s in snapshots:
@@ -299,7 +313,11 @@ def build_attempt_pdf_data(attempt, exam, student, events, snapshots, with_image
             else:
                 snap = snaps[0]  # one representative image per continuous event
                 if with_images:
-                    data, state, msg = load_snapshot_bytes(snap)
+                    blob_b = blob_map.get(snap.snapshot_id) if blob_map else getattr(snap, "_blob_bytes", None)
+                    try:
+                        data, state, msg = load_snapshot_bytes(snap, blob_bytes=blob_b)
+                    except TypeError:
+                        data, state, msg = load_snapshot_bytes(snap)
                 else:
                     data, state, msg = None, ("image" if snap.storage_status == "uploaded" else "pending"), ""
                 ev = {"state": state, "image_bytes": data, "message": msg,
@@ -429,7 +447,17 @@ async def download_pdf_report(
 ):
     """Generate and download a PDF report (with embedded evidence images) for an attempt."""
     attempt, exam, student, events, snapshots = await _load(db, attempt_id, actor, with_images=True)
-    pdf_bytes = render_report_pdf(build_attempt_pdf_data(attempt, exam, student, events, snapshots))
+    blob_map: dict[str, bytes] = {}
+    snap_ids = [s.snapshot_id for s in snapshots]
+    if snap_ids:
+        from app.db.models import SnapshotBlob
+        blob_rows = (await db.execute(
+            select(SnapshotBlob.snapshot_id, SnapshotBlob.image_data)
+            .where(SnapshotBlob.snapshot_id.in_(snap_ids))
+        )).all()
+        blob_map = {row[0]: row[1] for row in blob_rows}
+
+    pdf_bytes = render_report_pdf(build_attempt_pdf_data(attempt, exam, student, events, snapshots, with_images=True, blob_map=blob_map))
     filename = f"examproctor_report_{attempt_id[:8]}.pdf"
     return StreamingResponse(
         io.BytesIO(pdf_bytes),

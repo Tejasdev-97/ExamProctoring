@@ -25,7 +25,7 @@ import { logPhoneDiagnostic } from './phoneClassifier.js';
 
 const DEFAULT_CONFIG = {
   face_absence_grace_ms: 5000,
-  multiple_faces_grace_ms: 2000,
+  multiple_faces_grace_ms: 1000,
   sustained_head_turn_ms: 3000,
   phone_confirm_ms: 1000,
   phone_detection_threshold: 0.65,

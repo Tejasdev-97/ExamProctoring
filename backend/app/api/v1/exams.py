@@ -484,6 +484,10 @@ async def delete_exam(
 
     # 3. Cascade delete database records
     if attempt_ids:
+        snap_ids = (await db.execute(select(Snapshot.snapshot_id).where(Snapshot.attempt_id.in_(attempt_ids)))).scalars().all()
+        if snap_ids:
+            from app.db.models import SnapshotBlob
+            await db.execute(delete(SnapshotBlob).where(SnapshotBlob.snapshot_id.in_(snap_ids)))
         await db.execute(delete(Snapshot).where(Snapshot.attempt_id.in_(attempt_ids)))
         await db.execute(delete(ProctorEvent).where(ProctorEvent.attempt_id.in_(attempt_ids)))
         await db.execute(delete(Answer).where(Answer.attempt_id.in_(attempt_ids)))

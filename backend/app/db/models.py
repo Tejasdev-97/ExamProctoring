@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     Boolean, BigInteger, Column, DateTime, Enum, ForeignKey,
-    Integer, Numeric, String, Text, UniqueConstraint, CheckConstraint,
+    Integer, LargeBinary, Numeric, String, Text, UniqueConstraint, CheckConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
@@ -246,6 +246,23 @@ class Snapshot(Base):
     attempt = relationship("ExamAttempt", back_populates="snapshots")
     video_session = relationship("VideoAnalysisSession", back_populates="snapshots")
     event = relationship("ProctorEvent", back_populates="snapshots")
+    blob = relationship("SnapshotBlob", back_populates="snapshot", uselist=False, cascade="all, delete-orphan")
+
+
+class SnapshotBlob(Base):
+    __tablename__ = "snapshot_blobs"
+
+    snapshot_id = Column(
+        UUID(as_uuid=False),
+        ForeignKey("snapshots.snapshot_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    image_data = Column(LargeBinary, nullable=False)
+    size_bytes = Column(BigInteger, nullable=False)
+    sha256 = Column(String(64), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+
+    snapshot = relationship("Snapshot", back_populates="blob")
 
 
 # ── Sync Operations ───────────────────────────────────────────────────────────

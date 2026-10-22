@@ -99,38 +99,26 @@ async def upload_snapshot_binary(
     if not attempt:
         raise ForbiddenError("Not authorized to upload this snapshot.")
 
-    # Already uploaded — idempotent
-    if snap.storage_status == "uploaded":
-        return {"data": {"snapshot_id": snapshot_id, "status": "already_uploaded"}}
-
-    # Validate size
+    # Read binary content safely
     content = await file.read()
-    if len(content) > settings.MAX_SNAPSHOT_SIZE_BYTES:
-        raise AppError(413, "FILE_TOO_LARGE", "Snapshot exceeds maximum permitted size.")
 
-    # Verify checksum
-    actual_sha256 = hashlib.sha256(content).hexdigest()
-    if actual_sha256 != snap.sha256:
-        snap.storage_status = "failed"
-        raise AppError(422, "CHECKSUM_MISMATCH", "Snapshot binary does not match registered checksum.")
+    # Use durable evidence storage service
+    from app.services.evidence_storage import persist_snapshot_blob
+    blob_record, status_msg = await persist_snapshot_blob(
+        db=db,
+        snap=snap,
+        content=content,
+        expected_sha256=snap.sha256,
+    )
 
-    # Store locally (or send to object storage in production)
-    if settings.SNAPSHOT_STORAGE_TYPE == "local":
-        storage_dir = Path(settings.SNAPSHOT_LOCAL_DIR) / snap.attempt_id
-        storage_dir.mkdir(parents=True, exist_ok=True)
-        storage_path = storage_dir / f"{snapshot_id}.jpg"
-        async with aiofiles.open(storage_path, "wb") as f:
-            await f.write(content)
-        snap.storage_key = str(storage_path)
-
-    snap.storage_status = "uploaded"
-    snap.server_received_at = datetime.now(timezone.utc)
+    # Commit transaction to PostgreSQL before acknowledging success
+    await db.commit()
 
     return {
         "data": {
             "snapshot_id": snapshot_id,
             "status": "uploaded",
-            "server_received_at": snap.server_received_at.isoformat(),
+            "server_received_at": snap.server_received_at.isoformat() if snap.server_received_at else None,
         }
     }
 
@@ -178,7 +166,7 @@ async def get_snapshot_image(
     actor: ProfessorUser,
     db: AsyncSession = Depends(get_db),
 ):
-    """Serve the stored JPEG to an authorized professor/admin for evidence review."""
+    """Serve stored JPEG bytes from PostgreSQL snapshot_blobs, falling back to legacy disk."""
     snap = (await db.execute(select(Snapshot).where(Snapshot.snapshot_id == snapshot_id))).scalars().first()
     if not snap:
         raise NotFoundError("Snapshot")
@@ -197,7 +185,25 @@ async def get_snapshot_image(
     else:
         raise NotFoundError("Snapshot")
 
-    path = resolve_snapshot_path(snap)
-    if path is None:
+    from app.services.evidence_storage import get_snapshot_image_bytes
+    from fastapi.responses import Response
+
+    image_bytes, mime_type = await get_snapshot_image_bytes(db, snap, auto_migrate_legacy=True)
+    if not image_bytes:
         raise NotFoundError("Snapshot image")
-    return FileResponse(path, media_type=snap.mime_type or "image/jpeg")
+
+    # If legacy image was auto-migrated during read, commit the new blob
+    try:
+        await db.commit()
+    except Exception:
+        pass
+
+    return Response(
+        content=image_bytes,
+        media_type=mime_type or "image/jpeg",
+        headers={
+            "Cache-Control": "private, no-cache, no-store, must-revalidate",
+            "Content-Length": str(len(image_bytes)),
+        },
+    )
+

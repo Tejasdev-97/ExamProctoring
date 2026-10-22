@@ -311,20 +311,14 @@ async def upload_analysis_snapshot(
     """Upload representative JPEG snapshot evidence captured during video analysis."""
     session = await _get_authorized_session(session_id, actor, db)
 
-    # Check for duplicate snapshot (idempotent)
+    # Check for duplicate snapshot or existing metadata
     existing: Optional[Snapshot] = (
         await db.execute(
             select(Snapshot).where(Snapshot.snapshot_id == snapshot_id)
         )
     ).scalars().first()
-    if existing and existing.storage_status == "uploaded":
-        return {"data": {"snapshot_id": snapshot_id, "status": "already_uploaded"}}
 
     content = await file.read()
-    if len(content) > settings.MAX_SNAPSHOT_SIZE_BYTES:
-        raise AppError(413, "FILE_TOO_LARGE", "Snapshot exceeds maximum permitted size.")
-
-    checksum = hashlib.sha256(content).hexdigest()
     now = datetime.now(timezone.utc)
     base_epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
     captured_dt = (
@@ -333,21 +327,7 @@ async def upload_analysis_snapshot(
         else now
     )
 
-    # Store locally under snapshot directory
-    storage_dir = Path(settings.SNAPSHOT_LOCAL_DIR) / "video_analysis" / session_id
-    storage_dir.mkdir(parents=True, exist_ok=True)
-    storage_path = storage_dir / f"{snapshot_id}.jpg"
-    async with aiofiles.open(storage_path, "wb") as f:
-        await f.write(content)
-
-    if existing:
-        existing.storage_status = "uploaded"
-        existing.storage_key = str(storage_path)
-        existing.server_received_at = now
-        existing.sha256 = checksum
-        existing.size_bytes = len(content)
-        snap = existing
-    else:
+    if not existing:
         snap = Snapshot(
             snapshot_id=snapshot_id,
             video_analysis_session_id=session.video_analysis_session_id,
@@ -358,19 +338,30 @@ async def upload_analysis_snapshot(
             server_received_at=now,
             mime_type="image/jpeg",
             size_bytes=len(content),
-            sha256=checksum,
-            storage_status="uploaded",
-            storage_key=str(storage_path),
+            sha256=hashlib.sha256(content).hexdigest(),
+            storage_status="pending",
             created_at=now,
         )
         db.add(snap)
+        await db.flush()
+    else:
+        snap = existing
+
+    # Use shared evidence storage service for durable PostgreSQL persistence
+    from app.services.evidence_storage import persist_snapshot_blob
+    blob_record, status_msg = await persist_snapshot_blob(
+        db=db,
+        snap=snap,
+        content=content,
+        expected_sha256=snap.sha256,
+    )
 
     await db.commit()
     return {
         "data": {
             "snapshot_id": snap.snapshot_id,
             "status": "uploaded",
-            "server_received_at": snap.server_received_at.isoformat(),
+            "server_received_at": snap.server_received_at.isoformat() if snap.server_received_at else None,
         }
     }
 
@@ -429,6 +420,17 @@ async def download_video_analysis_pdf(
         )
     ).scalars().all()
 
+    # Preload blob bytes for snapshots in a single query
+    snap_ids = [s.snapshot_id for s in snapshots]
+    blob_map: dict[str, bytes] = {}
+    if snap_ids:
+        from app.db.models import SnapshotBlob
+        blob_rows = (await db.execute(
+            select(SnapshotBlob.snapshot_id, SnapshotBlob.image_data)
+            .where(SnapshotBlob.snapshot_id.in_(snap_ids))
+        )).all()
+        blob_map = {row[0]: row[1] for row in blob_rows}
+
     # Map snapshots by event_id
     by_event: dict[str, list] = {}
     for s in snapshots:
@@ -459,7 +461,7 @@ async def download_video_analysis_pdf(
                 ev = {"state": "unavailable", "message": msg}
             else:
                 snap = snaps[0]
-                data, state, msg = load_snapshot_bytes(snap)
+                data, state, msg = load_snapshot_bytes(snap, blob_bytes=blob_map.get(snap.snapshot_id))
                 ev = {
                     "state": state,
                     "image_bytes": data,
@@ -535,7 +537,16 @@ async def delete_analysis_session(
         except OSError as e:
             print(f"[VideoAnalysis] Warning: Failed to delete session storage directory {storage_dir}: {e}")
 
-    # 2. Database records cleanup: delete snapshots, events, session
+    # 2. Database records cleanup: delete snapshot blobs, snapshots, events, session
+    snap_ids = (
+        await db.execute(
+            select(Snapshot.snapshot_id).where(Snapshot.video_analysis_session_id == session_id)
+        )
+    ).scalars().all()
+    if snap_ids:
+        from app.db.models import SnapshotBlob
+        await db.execute(delete(SnapshotBlob).where(SnapshotBlob.snapshot_id.in_(snap_ids)))
+
     await db.execute(
         delete(Snapshot).where(Snapshot.video_analysis_session_id == session_id)
     )
